@@ -1,0 +1,39 @@
+## Interface: 16001
+## Title: Fresh Fixes
+## Notes: Guild raid & QoL toolkit
+## Author: Fresh Fixes
+## Version: 0.1.0
+## SavedVariables: FreshFixesDB
+## OptionalDeps: EllesmereUI
+## IconTexture: Interface\Icons\INV_Misc_Note_06
+
+Core.lua
+Codec.lua
+Comms.lua
+Skin.lua
+TextBox.lua
+UI.lua
+Group.lua
+Options.lua
+Profiles.lua
+
+Modules\Nicknames.lua
+Modules\NicknamesFrames.lua
+Modules\Groups.lua
+Modules\Consumes.lua
+Modules\Cooldowns.lua
+Modules\Gear.lua
+Modules\QoL.lua
+Modules\QoL_Extra.lua
+Modules\MapData.lua
+Modules\MapIcons.lua
+Modules\Map.lua
+Modules\MapReveal.lua
+MapPins.xml
+Modules\MouseRing.lua
+Modules\CoTank.lua
+Modules\Summon.lua
+Modules\Resurrect.lua
+Modules\Waypoints.lua
+Modules\Professions.lua
+Modules\Guild.lua

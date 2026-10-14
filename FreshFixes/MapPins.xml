@@ -1,0 +1,17 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.blizzard.com/wow/ui/ ..\FrameXML\UI.xsd">
+    <!-- World/battlefield map icon pin. Behaviour lives in FreshFixesMapPinMixin (Modules\MapReveal.lua).
+         The map canvas routes mouse events itself: pins must NOT set OnEnter/OnLeave/OnMouseUp scripts,
+         only define OnMouseEnter / OnMouseLeave / OnMouseClickAction on the mixin. -->
+    <Frame name="FreshFixesMapPinTemplate" mixin="FreshFixesMapPinMixin" enableMouse="true" virtual="true">
+        <Size x="20" y="20"/>
+        <Layers>
+            <Layer level="ARTWORK">
+                <Texture parentKey="Texture" setAllPoints="true"/>
+            </Layer>
+        </Layers>
+        <Scripts>
+            <OnLoad method="OnLoad"/>
+        </Scripts>
+    </Frame>
+</Ui>
