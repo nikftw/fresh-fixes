@@ -127,6 +127,9 @@ end
 -- Incoming
 ---------------------------------------------------------------------------
 local receivers = {}
+local MAX_CHUNKS = 256 -- cap on pieces per message
+local MAX_PENDING = 32 -- cap on in-flight chunk sets
+local pendingCount = 0
 local partial = {} -- [senderKey..id] = { n=, got=, parts={}, t= }
 
 -- fn(payload, channel, senderDisplay, senderKey, sender) - sender as the game gave it
@@ -152,6 +155,7 @@ local function startSweep()
         for slot, p in pairs(partial) do
             if now - (p.t or 0) > 60 then
                 partial[slot] = nil
+                pendingCount = pendingCount - 1
             end
         end
         if not next(partial) then
@@ -185,9 +189,19 @@ local function receive(_, prefix, msg, channel, sender)
         return
     end
     i, n = tonumber(i), tonumber(n)
+    -- reject malformed or oversized chunk sets
+    if not i or not n or n < 1 or n > MAX_CHUNKS or i < 1 or i > n or #piece > 255 then
+        return
+    end
     local slot = key .. mod .. id
     local p = partial[slot]
     if not p or p.n ~= n then
+        if not p then
+            if pendingCount >= MAX_PENDING then
+                return
+            end
+            pendingCount = pendingCount + 1
+        end
         p = { n = n, got = 0, parts = {} }
         partial[slot] = p
         startSweep()
@@ -199,6 +213,7 @@ local function receive(_, prefix, msg, channel, sender)
     p.t = GetTime()
     if p.got == n then
         partial[slot] = nil
+        pendingCount = pendingCount - 1
         deliver(mod, table.concat(p.parts), channel, display, key, sender)
     end
 end

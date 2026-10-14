@@ -436,7 +436,8 @@ FF.Init("Nicknames", function()
         if not d then
             return
         end
-        local from = type(d.from) == "string" and d.from or display
+        -- trust only the real sender the game reports, never a name inside the payload
+        local from = display
         local key = nameKey(from)
         local function apply(retry)
             local ok = isOfficer(key)
