@@ -213,6 +213,7 @@ FF.catalog = {
     { key = "CoTank", icon = "Interface\\Icons\\INV_Shield_06", default = false, title = "Co-Tank Frame", desc = "Small clickable frame for the other tank." },
     { key = "Summon", icon = "Interface\\Icons\\Spell_Shadow_Twilight", default = false, title = "Summons", desc = "Ritual of Summoning announcements and a '123' summon queue." },
     { key = "Resurrect", icon = "Interface\\Icons\\Spell_Holy_Resurrection", default = false, title = "Resurrections", desc = "After a boss: bars showing who is resurrecting whom, plus announcing your own resurrections." },
+    { key = "DropCheapest", icon = "Interface\\Icons\\INV_Misc_Bag_10", default = false, title = "Drop Cheapest", desc = "Button and /ff drop to delete the cheapest junk item in your bags (greys first, confirms anything better)." },
     { key = "Waypoints", icon = "Interface\\Icons\\Ability_Tracking", default = false, title = "Waypoints", desc = "Built-in in-world waypoint that follows the current RestedXP guide step, plus /ff way." },
 }
 FF.modules = {}

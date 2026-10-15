@@ -2,7 +2,7 @@
 ## Title: Fresh Fixes
 ## Notes: Guild raid & QoL toolkit
 ## Author: Fresh Fixes
-## Version: 0.1.1
+## Version: 0.2.0
 ## SavedVariables: FreshFixesDB
 ## OptionalDeps: EllesmereUI
 ## IconTexture: Interface\Icons\INV_Misc_Note_06
@@ -37,3 +37,4 @@ Modules\Resurrect.lua
 Modules\Waypoints.lua
 Modules\Professions.lua
 Modules\Guild.lua
+Modules\DropCheapest.lua
