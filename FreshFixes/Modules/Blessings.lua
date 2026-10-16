@@ -146,6 +146,25 @@ FF.Init("Blessings", function()
     M.pals, M.assign = pals, assign
 
     local refreshPanel, refreshHelper -- forward
+
+    -- Same states as UI.Button / list rows: flat "row" fill + 1px border,
+    -- hover = C.hover fill + accent border.
+    local function hoverOn(self)
+        FF.SetBg(self, C.hover)
+        FF.SetBorder(self, C.accent)
+    end
+    local function hoverOff(self)
+        FF.SetBg(self, C.row)
+        FF.SetBorder(self, C.border)
+    end
+    -- icon inset 1px inside a skinned square, trimmed like UI.lua icons
+    local function iconIn(f, inset)
+        local t = f:CreateTexture(nil, "ARTWORK")
+        t:SetPoint("TOPLEFT", inset, -inset)
+        t:SetPoint("BOTTOMRIGHT", -inset, inset)
+        t:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        return t
+    end
     local function changed()
         if refreshPanel then refreshPanel() end
         if refreshHelper then refreshHelper() end
@@ -512,11 +531,11 @@ FF.Init("Blessings", function()
         panel.rows = {}
         local y0 = -(UI.TITLE_H + 6)
         for c = 1, MAXC do
-            local t = panel:CreateTexture(nil, "ARTWORK")
-            t:SetSize(CELL - 4, CELL - 4)
-            t:SetPoint("TOPLEFT", 6 + NAMEW + (c - 1) * (CELL + 2) + 2, y0)
-            FF.SetIcon(t, "Interface\\Icons\\ClassIcon_" .. CLASS[c]:sub(1, 1) .. CLASS[c]:sub(2):lower())
-            t:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            local h = CreateFrame("Frame", nil, panel)
+            h:SetSize(CELL, CELL)
+            h:SetPoint("TOPLEFT", 6 + NAMEW + (c - 1) * (CELL + 2), y0 + 2)
+            FF.Skin(h, "panel")
+            FF.SetIcon(iconIn(h, 2), "Interface\\Icons\\ClassIcon_" .. CLASS[c]:sub(1, 1) .. CLASS[c]:sub(2):lower())
         end
         panel.smart = UI.Button(panel, "Smart", 60, 18, M.Smart, "Auto-assign by known blessings and spec (Kings first, Wisdom from Holy, Might from Ret, Sanctuary from Prot)")
         panel.clear = UI.Button(panel, "Clear", 50, 18, M.Clear, "Leader: clear everyone's. Otherwise: clear yours")
@@ -534,8 +553,12 @@ FF.Init("Blessings", function()
         if r then return r end
         r = CreateFrame("Frame", nil, panel)
         r:SetSize(NAMEW + MAXC * (CELL + 2), CELL)
+        r.strip = CreateFrame("Frame", nil, r)
+        r.strip:SetPoint("TOPLEFT")
+        r.strip:SetSize(NAMEW - 2, CELL)
+        FF.Skin(r.strip, "card", C.cardBd)
         r.name = FF.Text(r, "small")
-        r.name:SetPoint("LEFT", 0, 0)
+        r.name:SetPoint("LEFT", 4, 0)
         r.name:SetWidth(NAMEW - 4)
         r.name:SetJustifyH("LEFT")
         r.name:SetWordWrap(false)
@@ -545,10 +568,7 @@ FF.Init("Blessings", function()
             b:SetSize(CELL, CELL)
             b:SetPoint("LEFT", NAMEW + (c - 1) * (CELL + 2), 0)
             FF.Skin(b, "row")
-            b.tex = b:CreateTexture(nil, "ARTWORK")
-            b.tex:SetPoint("TOPLEFT", 2, -2)
-            b.tex:SetPoint("BOTTOMRIGHT", -2, 2)
-            b.tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            b.tex = iconIn(b, 2)
             b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
             b:SetScript("OnClick", function(self, btn)
                 if InCombatLockdown() or not canEdit(r.pal) then return end
@@ -560,14 +580,14 @@ FF.Init("Blessings", function()
                 end
             end)
             b:SetScript("OnEnter", function(self)
-                FF.SetBorder(self, C.accent)
+                hoverOn(self)
                 local v = (assign[r.pal] or {})[c] or 0
                 FF.Tip(self, (v > 0 and (spellInfo(BASE[v]) or SHORT[v]) or "None") ..
                     (canEdit(r.pal) and "\nClick / right-click to change, Shift-click to clear" or "\nLocked (needs lead/assist or their Free Assignment)"),
                     FF.ClassColor(CLASS[c], CLASS[c]:sub(1, 1) .. CLASS[c]:sub(2):lower()))
             end)
             b:SetScript("OnLeave", function(self)
-                FF.SetBorder(self, C.border)
+                hoverOff(self)
                 FF.HideTip()
             end)
             r.cells[c] = b
@@ -697,16 +717,17 @@ FF.Init("Blessings", function()
             b:RegisterForClicks("AnyUp", "AnyDown")
             FF.Skin(b, "row")
             b.ic = b:CreateTexture(nil, "ARTWORK")
-            b.ic:SetSize(14, 14)
-            b.ic:SetPoint("LEFT", 2, 0)
+            b.ic:SetPoint("TOPLEFT", 1, -1)
+            b.ic:SetPoint("BOTTOMLEFT", 1, 1)
+            b.ic:SetWidth(16)
             b.ic:SetTexCoord(0.08, 0.92, 0.08, 0.92)
             b.text = FF.Text(b, "small")
             b.text:SetPoint("LEFT", b.ic, "RIGHT", 4, 0)
             b.text:SetPoint("RIGHT", -2, 0)
             b.text:SetJustifyH("LEFT")
             b.text:SetWordWrap(false)
-            b:SetScript("OnEnter", function(self) FF.SetBorder(self, C.accent) end)
-            b:SetScript("OnLeave", function(self) FF.SetBorder(self, C.border) end)
+            b:SetScript("OnEnter", hoverOn)
+            b:SetScript("OnLeave", hoverOff)
             b:Hide()
             hRows[i] = b
         end
