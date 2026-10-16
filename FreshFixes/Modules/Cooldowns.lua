@@ -14,6 +14,7 @@ FF.Init("Cooldowns", function()
         width = 200, perColumn = 12, columns = 3, locked = true, showSpellName = false, showTitle = true,
         sortBy = "spellReady", readyFirst = false, reverse = false,
         clickCall = true, barFills = false, showLastOn = true, barRight = true, nicknames = true,
+        reqHighlight = false, reqSound = "RAID_WARNING", reqDuration = 8,
     })
     db.off = db.off or {} -- [spell] = true: not shown
     db.extra = db.extra or {} -- [spell name] = cooldown seconds (user additions)
@@ -413,6 +414,186 @@ FF.Init("Cooldowns", function()
         win:Show()
     end
 
+    ---------------------------------------------------------------------------
+    -- Highlight on request: when someone in the group clicks one of YOUR
+    -- cooldown rows, their whisper ("<Spell> please" / "<Spell> please (ready
+    -- in m:ss)", see callCooldown) puts a flat accent border over their raid
+    -- frame and plays a sound. Overlays are our own plain frames (never
+    -- secure), parented to UIParent and anchored over the unit frame, made
+    -- out of combat. Idle = no OnUpdate and no events beyond the whisper.
+    ---------------------------------------------------------------------------
+    local C = FF.C
+    local pool, lit = {}, {} -- lit[senderKey] = { frames = {}, spell, timer }
+    local POOL = 8
+
+    local function makeOverlay()
+        local o = CreateFrame("Frame", nil, UIParent)
+        o:Hide()
+        local e = {}
+        for i = 1, 4 do
+            e[i] = o:CreateTexture(nil, "OVERLAY", nil, 7)
+            e[i]:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 1)
+        end
+        local t = 2 -- 2px reads as a border on raid frames; still flat
+        e[1]:SetPoint("TOPLEFT"); e[1]:SetPoint("TOPRIGHT"); e[1]:SetHeight(t)
+        e[2]:SetPoint("BOTTOMLEFT"); e[2]:SetPoint("BOTTOMRIGHT"); e[2]:SetHeight(t)
+        e[3]:SetPoint("TOPLEFT"); e[3]:SetPoint("BOTTOMLEFT"); e[3]:SetWidth(t)
+        e[4]:SetPoint("TOPRIGHT"); e[4]:SetPoint("BOTTOMRIGHT"); e[4]:SetWidth(t)
+        local glow = o:CreateTexture(nil, "OVERLAY", nil, 6)
+        glow:SetAllPoints()
+        glow:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 0.12)
+        local ag = o:CreateAnimationGroup()
+        ag:SetLooping("BOUNCE")
+        local a = ag:CreateAnimation("Alpha")
+        a:SetFromAlpha(1)
+        a:SetToAlpha(0.35)
+        a:SetDuration(0.5)
+        o.pulse = ag
+        return o
+    end
+    local function fillPool()
+        if InCombatLockdown() then return end
+        while #pool < POOL do pool[#pool + 1] = makeOverlay() end
+    end
+
+    local function release(key)
+        local a = lit[key]
+        if not a then return end
+        if a.timer then a.timer:Cancel() end
+        for _, o in ipairs(a.frames) do
+            o.pulse:Stop()
+            o:Hide()
+            o:ClearAllPoints()
+            pool[#pool + 1] = o
+        end
+        lit[key] = nil
+    end
+
+    -- Unit frames showing `unit`, from every frame system we know
+    local function frameUnit(f)
+        local u = f and (f.displayedUnit or f.unit)
+        if type(u) == "string" and readable(u) then return u end
+    end
+    local function framesFor(unit)
+        local found, seen = {}, {}
+        local function try(f)
+            if f and not seen[f] and f.IsVisible and f:IsVisible() then
+                local u = frameUnit(f)
+                if u and UnitExists(u) and UnitIsUnit(u, unit) then
+                    seen[f] = true
+                    found[#found + 1] = f
+                end
+            end
+        end
+        -- Blizzard compact raid / party frames
+        for i = 1, 40 do try(_G["CompactRaidFrame" .. i]) end
+        for g = 1, 8 do
+            for i = 1, 5 do try(_G["CompactRaidGroup" .. g .. "Member" .. i]) end
+        end
+        for i = 1, 5 do try(_G["CompactPartyFrameMember" .. i]) end
+        -- ElvUI (oUF): every spawned unit frame is in ElvUF.objects
+        local ouf = _G.ElvUF
+        if type(ouf) == "table" and type(ouf.objects) == "table" then
+            for _, f in ipairs(ouf.objects) do
+                local n = f.GetName and f:GetName()
+                if n and (n:find("^ElvUF_Raid") or n:find("^ElvUF_Party")) then try(f) end
+            end
+        end
+        -- EllesmereUI and anything else: generic scan of visible frames with a
+        -- .unit field (only runs on a request, never while idle)
+        if #found == 0 then
+            local f = EnumerateFrames()
+            local n = 0
+            while f and n < 20000 do
+                n = n + 1
+                if not f:IsForbidden() and rawget(f, "unit") ~= nil then
+                    local name = f:GetName()
+                    -- raid / party style frames only (skip target, focus, nameplates)
+                    local u = frameUnit(f)
+                    if u and (u:find("^raid%d") or u:find("^party%d") or u == "player") and not (name and name:find("NamePlate")) then
+                        try(f)
+                    end
+                end
+                f = EnumerateFrames(f)
+            end
+        end
+        return found
+    end
+
+    local castWatch = CreateFrame("Frame")
+    local function watchCasts()
+        if next(lit) then
+            castWatch:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
+        else
+            castWatch:UnregisterAllEvents()
+        end
+    end
+    castWatch:SetScript("OnEvent", function(_, _, _, _, spellID)
+        if not readable(spellID) then return end
+        local n = spellName(spellID)
+        if not n or not readable(n) then return end
+        for key, a in pairs(lit) do
+            if a.spell == n then release(key) end
+        end
+        watchCasts()
+    end)
+
+    function M.Highlight(unit, key, spell)
+        release(key) -- a new request replaces this sender's old one
+        local frames = framesFor(unit)
+        local a = { frames = {}, spell = spell }
+        for _, f in ipairs(frames) do
+            local o = table.remove(pool)
+            if not o then break end -- pool is made out of combat only
+            o:SetFrameStrata(f:GetFrameStrata())
+            o:SetFrameLevel(math.min(10000, f:GetFrameLevel() + 20))
+            o:ClearAllPoints()
+            o:SetPoint("TOPLEFT", f, "TOPLEFT", 0, 0)
+            o:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
+            o:Show()
+            o.pulse:Play()
+            a.frames[#a.frames + 1] = o
+        end
+        lit[key] = a
+        a.timer = C_Timer.NewTimer(db.reqDuration or 8, function()
+            release(key)
+            watchCasts()
+        end)
+        watchCasts()
+        return #a.frames
+    end
+
+    -- "<Spell> please" or "<Spell> please (ready in 1:23)" / "(ready in 1h02m)"
+    local function parseRequest(text)
+        local spell = text:match("^(.-) please$") or text:match("^(.-) please %(ready in [%dhm:]+%)$")
+        return spell
+    end
+
+    local function onWhisper(_, text, sender)
+        if not db.reqHighlight or not (readable(text) and readable(sender)) or type(text) ~= "string" then return end
+        local spell = parseRequest(text)
+        if not spell or not tracked[spell] or not known(spell) then return end -- only requests for my tracked spells
+        local key = FF.Key(sender)
+        key = key and FF.CanonicalKey(key)
+        local unit = key and FF.UnitByKey(key)
+        if not unit or UnitIsUnit(unit, "player") then return end -- must be in my group
+        FF.PlaySound(db.reqSound)
+        M.Highlight(unit, key, spell)
+    end
+
+    local function applyRequest()
+        FF.Listen("CHAT_MSG_WHISPER", onWhisper, db.reqHighlight and true or false)
+        FF.Listen("PLAYER_REGEN_ENABLED", fillPool, db.reqHighlight and true or false)
+        if db.reqHighlight then
+            fillPool()
+        else
+            for key in pairs(lit) do release(key) end
+            watchCasts()
+        end
+    end
+    M.ApplyRequest = applyRequest
+    FF.On("FF_READY", applyRequest)
+
     FF.Settings("Cooldowns", function(L)
         L:Header("Window")
         L:Toggle("Show the raid cooldown window", db, "show", { onChange = M.Wake })
@@ -451,6 +632,18 @@ FF.Init("Cooldowns", function()
         L:Toggle("Click to call cooldowns", db, "clickCall", { dep = on, onChange = M.Refresh,
             tip = "Click a row: whisper that player to use it. Shift-click: ask for it in raid/party chat." })
         L:TitleToggle(db, function() return win end)
+
+        L:Header("Requests")
+        L:Toggle("Highlight on raid cooldown request", db, "reqHighlight", { onChange = M.ApplyRequest,
+            tip = "When someone clicks your cooldown in their window, their whisper puts a border on their raid frame and plays a sound" })
+        local req = function() return db.reqHighlight end
+        L:Select("Request sound", db, "reqSound", FF.SoundChoices, { dep = req, width = 180 })
+        L:Buttons({ { "Test sound", function() FF.PlaySound(db.reqSound) end },
+            { "Test highlight", function()
+                local n = M.Highlight("player", "_test", "")
+                if n == 0 then FF.print("No raid/party frame found for you (frames must be visible)") end
+            end, "Highlights your own raid frame" } }, { dep = req })
+        L:Slider("Highlight duration (seconds)", db, "reqDuration", 3, 30, 1, { dep = req })
 
         L:Header("Tracked spells")
         L:Desc("Everyone running Fresh Fixes reports their own cooldowns. Turn off spells you don't care about.")
