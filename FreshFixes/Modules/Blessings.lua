@@ -25,7 +25,7 @@ local M = FF.Module("Blessings")
 -- PallyPower addon is loaded, this module stays completely passive.
 FF.Init("Blessings", function()
     local db = FF.DB("blessings", {
-        panel = false, helper = true, salv = false, free = true, greater = true,
+        panel = false, helper = true, salv = true, free = true, greater = true,
         layout = "vertical", showNick = true, showTitle = false,
         -- Assignments control on the helper (always first by default).
         assignBtn = true,
@@ -34,20 +34,19 @@ FF.Init("Blessings", function()
         -- "assign_auto" | "auto_assign" — which control comes first on the shared 50/50 row.
         ctrlOrder = "assign_auto",
         -- Fixed helper column width (px); timer text is centered in its slot.
-        colWidth = 56,
+        colWidth = 80,
         -- Expanded player-row width on the buff helper (px).
         playerWidth = 90,
         -- Timer placement: "left" | "right" | "above" | "below" (default right).
         timerPos = "right",
         -- Salv helper strip: either toggle shows the column/row.
         salvIcon = true, salvTimer = true,
-        -- Tint Salv icon green when buffed / red when anyone in that class is missing.
+        -- Tint Salv icon (requires Show Salv icon). Green / orange / red by buff state.
         salvColorIcon = true,
-        -- "auto" | "left" | "right" | "above" | "below"
-        -- auto = right when vertical, below when horizontal.
-        salvPos = "auto",
         -- Active indicator: independent channels (replaces old activeStyle select).
         activeBorder = true, activeTimer = true, activeFill = false, activeIcon = true,
+        -- Tint blessing icon (requires Blessing icon). Green / orange / red by buff state.
+        activeColorIcon = true,
         -- Timer on blessed cells: "m:ss" | "m" | "h:mm:ss" | "compact"
         timerFormat = "m:ss",
     })
@@ -1649,18 +1648,12 @@ FF.Init("Blessings", function()
 
     -- Salv strip on the helper. Icon, colour-icon, or timer shows it.
     local function showSalvColumn()
-        return db.salv and knows(1038) and (db.salvIcon or db.salvTimer or db.salvColorIcon) and true or false
+        return db.salv and knows(1038) and (db.salvIcon or db.salvTimer) and true or false
     end
 
-    -- Resolved Salv placement for the current layout.
+    -- Salv strip: right of class when vertical, below when horizontal.
     local function salvSide(vertical)
-        local p = db.salvPos
-        if vertical then
-            if p == "left" then return "left" end
-            return "right" -- default / auto / above / below → right
-        end
-        if p == "above" then return "above" end
-        return "below" -- default / auto / left / right → below
+        return vertical and "right" or "below"
     end
 
     -- Class blessing rows (+ classes with individual normals / salv-only).
@@ -2029,6 +2022,11 @@ FF.Init("Blessings", function()
             b.blessTex:ClearAllPoints()
             b.blessTex:SetPoint("LEFT", b.classTex, "RIGHT", 1, 0)
             b.blessTex:SetSize(HCELL_H - 4, HCELL_H - 4)
+            -- Coloured wash over the blessing icon (green = buffed, red = missing).
+            b.colorOverlay = b:CreateTexture(nil, "OVERLAY", nil, 7)
+            b.colorOverlay:SetAllPoints(b.blessTex)
+            b.colorOverlay:SetColorTexture(1, 1, 1, 0.45)
+            b.colorOverlay:Hide()
             b.timer = FF.Text(b, "small")
             b.timer:SetPoint("LEFT", b.blessTex, "RIGHT", 2, 0)
             b.timer:SetPoint("RIGHT", -1, 0)
@@ -2194,10 +2192,24 @@ FF.Init("Blessings", function()
             b.timer:SetText(text or "")
             if color then b.timer:SetTextColor(color[1], color[2], color[3]) end
         end
+        local function tintBless(color)
+            if not b.blessTex then return end
+            if db.activeIcon and db.activeColorIcon and color then
+                b.blessTex:SetVertexColor(color[1], color[2], color[3], 1)
+                if b.colorOverlay then
+                    b.colorOverlay:SetColorTexture(color[1], color[2], color[3], 0.4)
+                    b.colorOverlay:Show()
+                end
+            else
+                b.blessTex:SetVertexColor(1, 1, 1, 1)
+                if b.colorOverlay then b.colorOverlay:Hide() end
+            end
+        end
         if state == "need" then
             FF.SetBg(b, useFill and { C.bad[1] * 0.35, C.bad[2] * 0.35, C.bad[3] * 0.35, 1 } or C.row)
             FF.SetBorder(b, useBorder and C.bad or C.border)
             setTimer("")
+            tintBless(C.bad)
         elseif state == "partial" then
             FF.SetBg(b, useFill and { C.warn[1] * 0.3, C.warn[2] * 0.3, C.warn[3] * 0.3, 1 } or C.row)
             FF.SetBorder(b, useBorder and C.warn or C.border)
@@ -2206,6 +2218,7 @@ FF.Init("Blessings", function()
             else
                 setTimer("")
             end
+            tintBless(C.warn)
         elseif state == "ok" then
             FF.SetBg(b, useFill and { C.good[1] * 0.25, C.good[2] * 0.25, C.good[3] * 0.25, 1 } or C.row)
             FF.SetBorder(b, useBorder and C.good or C.border)
@@ -2214,10 +2227,12 @@ FF.Init("Blessings", function()
             else
                 setTimer("")
             end
+            tintBless(C.good)
         else
             FF.SetBg(b, C.row)
             FF.SetBorder(b, C.border)
             setTimer("")
+            tintBless(nil)
         end
     end
 
@@ -2328,7 +2343,7 @@ FF.Init("Blessings", function()
     end
 
     local function cellW()
-        local w = tonumber(db.colWidth) or 56
+        local w = tonumber(db.colWidth) or 80
         if w < minColW() then w = minColW() end
         if w > 140 then w = 140 end
         return w
@@ -2358,7 +2373,7 @@ FF.Init("Blessings", function()
     end
 
     local function salvShowsIcon()
-        return (db.salvIcon or db.salvColorIcon) and true or false
+        return db.salvIcon and true or false
     end
 
     local function salvCellW()
@@ -2390,8 +2405,12 @@ FF.Init("Blessings", function()
         b.blessTex:ClearAllPoints()
         b.blessTex:SetSize(ICON_SZ, ICON_SZ)
         if b.colorOverlay then
-            b.colorOverlay:ClearAllPoints()
-            b.colorOverlay:SetAllPoints(b.blessTex)
+            if showIcon then
+                b.colorOverlay:ClearAllPoints()
+                b.colorOverlay:SetAllPoints(b.blessTex)
+            else
+                b.colorOverlay:Hide()
+            end
         end
         b.timer:SetShown(showTimer)
         b.timer:ClearAllPoints()
@@ -2435,6 +2454,12 @@ FF.Init("Blessings", function()
         if showIcon then
             b.blessTex:ClearAllPoints()
             b.blessTex:SetSize(ICON_SZ, ICON_SZ)
+            if b.colorOverlay then
+                b.colorOverlay:ClearAllPoints()
+                b.colorOverlay:SetAllPoints(b.blessTex)
+            end
+        elseif b.colorOverlay then
+            b.colorOverlay:Hide()
         end
         b.timer:SetShown(showTimer)
         b.timer:ClearAllPoints()
@@ -2598,7 +2623,7 @@ FF.Init("Blessings", function()
             local useTimer = db.salvTimer
             local function tintIcon(color)
                 if not b.blessTex then return end
-                if db.salvColorIcon and color and salvShowsIcon() then
+                if db.salvIcon and db.salvColorIcon and color then
                     b.blessTex:SetVertexColor(color[1], color[2], color[3], 1)
                     if b.colorOverlay then
                         b.colorOverlay:SetColorTexture(color[1], color[2], color[3], 0.4)
@@ -2917,6 +2942,11 @@ FF.Init("Blessings", function()
         L:Toggle("Blessing icon", db, "activeIcon", {
             onChange = refreshHelper, tip = "Show the assigned blessing next to the class icon.",
         })
+        L:Toggle("Colour blessing icon", db, "activeColorIcon", {
+            onChange = refreshHelper,
+            dep = function() return db.activeIcon end,
+            tip = "Green = all buffed, orange = some missing, red = all missing. Needs Blessing icon on.",
+        })
         L:Toggle("Show title bar", db, "showTitle", {
             onChange = refreshHelper,
             tip = "Off by default. When on, drag the title to move and use the close button.",
@@ -2955,24 +2985,13 @@ FF.Init("Blessings", function()
         })
         L:Toggle("Colour Salv icon", db, "salvColorIcon", {
             onChange = refreshHelper,
-            dep = function() return db.salv end,
-            tip = "Green = all Salv'd, orange = some missing (keeps lowest timer), red = all missing.",
+            dep = function() return db.salv and db.salvIcon end,
+            tip = "Green = all Salv'd, orange = some missing, red = all missing. Needs Show Salv icon on.",
         })
         L:Toggle("Show Salv timer", db, "salvTimer", {
             onChange = refreshHelper,
             dep = function() return db.salv end,
-            tip = "Countdown on the Salv strip. Strip hides if icon, colour, and timer are all off.",
-        })
-        L:Select("Salv position", db, "salvPos", {
-            { "auto", "Auto (right if vertical, below if horizontal)" },
-            { "left", "Left of class (vertical)" },
-            { "right", "Right of class (vertical)" },
-            { "above", "Above class (horizontal)" },
-            { "below", "Below class (horizontal)" },
-        }, {
-            onChange = refreshHelper,
-            dep = function() return db.salv and (db.salvIcon or db.salvTimer or db.salvColorIcon) end,
-            tip = "Where the Salv strip sits relative to each class cell.",
+            tip = "Countdown on the Salv strip. Strip hides if icon and timer are both off.",
         })
         L:Toggle("Free assignment (anyone may set my blessings)", db, "free", { onChange = function()
             scanSelf(); last = nil; sendSelfSoon()
