@@ -2,7 +2,7 @@
 ## Title: Fresh Fixes
 ## Notes: Guild raid & QoL toolkit
 ## Author: Fresh Fixes
-## Version: 0.4.0
+## Version: 0.5.0
 ## SavedVariables: FreshFixesDB
 ## OptionalDeps: EllesmereUI
 ## IconTexture: Interface\Icons\INV_Misc_Note_06

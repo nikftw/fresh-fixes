@@ -16,6 +16,8 @@ local META = { profiles = true, profileOf = true, activeProfile = true, defaultP
 local DATA = {
     nicknames = { map = true, names = true, senders = true, mine = true },
     qolextra = { sparkleSaved = true },
+    -- Raid assignment state — kept across reload, not part of a settings profile
+    blessings = { assign = true, normal = true, aura = true },
 }
 
 local function copy(v)

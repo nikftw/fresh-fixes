@@ -132,22 +132,36 @@ end
 -- Our own flat tooltip (1px border, no Blizzard backdrop).
 --   FF.Tip(owner, text [, title]) / FF.HideTip()
 local tip
+local function ensureTip()
+    if tip then return tip end
+    tip = CreateFrame("Frame", "FreshFixesTooltip", UIParent)
+    tip:SetFrameStrata("TOOLTIP")
+    tip:SetClampedToScreen(true)
+    FF.Skin(tip, { 0.07, 0.07, 0.07, 0.97 })
+    tip.title = FF.Text(tip, "header")
+    tip.title:SetPoint("TOPLEFT", 8, -7)
+    tip.title:SetJustifyH("LEFT")
+    tip.body = FF.Text(tip)
+    tip.body:SetJustifyH("LEFT")
+    tip.body:SetWordWrap(true)
+    tip.rows = {}
+    return tip
+end
+
+local function hideTipRows()
+    if not tip or not tip.rows then return end
+    for _, row in ipairs(tip.rows) do
+        row:Hide()
+    end
+end
+
 function FF.Tip(owner, text, title)
     if not text or text == "" then
         return
     end
-    if not tip then
-        tip = CreateFrame("Frame", "FreshFixesTooltip", UIParent)
-        tip:SetFrameStrata("TOOLTIP")
-        tip:SetClampedToScreen(true)
-        FF.Skin(tip, { 0.07, 0.07, 0.07, 0.97 })
-        tip.title = FF.Text(tip, "header")
-        tip.title:SetPoint("TOPLEFT", 8, -7)
-        tip.title:SetJustifyH("LEFT")
-        tip.body = FF.Text(tip)
-        tip.body:SetJustifyH("LEFT")
-        tip.body:SetWordWrap(true)
-    end
+    ensureTip()
+    hideTipRows()
+    tip.body:Show()
     tip.title:SetText(title or "")
     tip.title:SetShown(title ~= nil)
     tip.body:ClearAllPoints()
@@ -166,8 +180,62 @@ function FF.Tip(owner, text, title)
     tip:Show()
 end
 
+-- lines = { { text = "...", icon = texturePathOrFileID }, ... }
+function FF.TipRich(owner, title, lines)
+    if type(lines) ~= "table" or #lines == 0 then
+        return
+    end
+    ensureTip()
+    tip.body:Hide()
+    tip.title:SetText(title or "")
+    tip.title:SetShown(title ~= nil)
+    local ICON = 14
+    local y = title and (tip.title:GetStringHeight() + 11) or 7
+    local maxW = title and tip.title:GetStringWidth() or 0
+    for i, line in ipairs(lines) do
+        local row = tip.rows[i]
+        if not row then
+            row = CreateFrame("Frame", nil, tip)
+            row:SetHeight(ICON + 2)
+            row.icon = row:CreateTexture(nil, "ARTWORK")
+            row.icon:SetSize(ICON, ICON)
+            row.icon:SetPoint("LEFT", 0, 0)
+            row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            row.text = FF.Text(row, "small")
+            row.text:SetJustifyH("LEFT")
+            tip.rows[i] = row
+        end
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", 8, -y)
+        if line.icon then
+            row.icon:SetTexture(line.icon)
+            row.icon:Show()
+            row.text:ClearAllPoints()
+            row.text:SetPoint("LEFT", row.icon, "RIGHT", 4, 0)
+        else
+            row.icon:Hide()
+            row.text:ClearAllPoints()
+            row.text:SetPoint("LEFT", 0, 0)
+        end
+        row.text:SetText(line.text or "")
+        local tw = (row.text:GetStringWidth() or 0) + (line.icon and (ICON + 4) or 0)
+        row:SetWidth(math.max(tw, 40))
+        maxW = math.max(maxW, tw)
+        row:Show()
+        y = y + ICON + 4
+    end
+    for i = #lines + 1, #tip.rows do
+        tip.rows[i]:Hide()
+    end
+    tip:SetSize(maxW + 16, y + 6)
+    tip:ClearAllPoints()
+    tip:SetPoint("BOTTOMLEFT", owner, "TOPRIGHT", 4, 2)
+    tip:Show()
+end
+
 function FF.HideTip()
     if tip then
+        hideTipRows()
         tip:Hide()
     end
 end
@@ -345,15 +413,14 @@ local function openMenu(owner, options, onPick)
         FF.Skin(menu, "panel")
         menu.items = {}
     end
-    local w = owner:GetWidth()
+    -- Size to the longest label (+ padding) so names aren't clipped at low UI scales.
+    local needW = math.max(owner:GetWidth() or 0, 120)
     for i, opt in ipairs(options) do
         local it = menu.items[i]
         if not it then
             it = CreateFrame("Button", nil, menu)
             it:SetHeight(20)
             it.text = FF.Text(it)
-            it.text:SetPoint("LEFT", 6, 0)
-            it.text:SetPoint("RIGHT", -6, 0)
             it.text:SetJustifyH("LEFT")
             it.hl = it:CreateTexture(nil, "HIGHLIGHT")
             it.hl:SetAllPoints()
@@ -362,7 +429,10 @@ local function openMenu(owner, options, onPick)
         end
         it:SetPoint("TOPLEFT", 1, -1 - (i - 1) * 20)
         it:SetPoint("RIGHT", -1, 0)
+        it.text:ClearAllPoints()
+        it.text:SetPoint("LEFT", 6, 0)
         it.text:SetText(opt[2])
+        needW = math.max(needW, (it.text:GetStringWidth() or 0) + 20)
         it:SetScript("OnClick", function()
             closeMenu()
             onPick(opt[1])
@@ -372,12 +442,21 @@ local function openMenu(owner, options, onPick)
     for i = #options + 1, #menu.items do
         menu.items[i]:Hide()
     end
-    menu:SetSize(math.max(w, 120), #options * 20 + 2)
+    menu:SetSize(needW, #options * 20 + 2)
+    for i = 1, #options do
+        local it = menu.items[i]
+        it.text:SetPoint("RIGHT", -6, 0)
+    end
     menu:ClearAllPoints()
     menu:SetPoint("TOPLEFT", owner, "BOTTOMLEFT", 0, -1)
     menu:SetScale(owner:GetEffectiveScale() / UIParent:GetEffectiveScale())
     catcher:Show()
     menu:Show()
+end
+
+-- options = { {value, label}, ... }; onPick(value)
+function UI.OpenMenu(owner, options, onPick)
+    openMenu(owner, options, onPick)
 end
 
 -- options = { {value, label}, ... }

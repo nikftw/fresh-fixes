@@ -14,7 +14,7 @@ FF.Init("Cooldowns", function()
         width = 200, perColumn = 12, columns = 3, locked = true, showSpellName = false, showTitle = true,
         sortBy = "spellReady", readyFirst = false, reverse = false,
         clickCall = true, barFills = false, showLastOn = true, barRight = true, nicknames = true,
-        reqHighlight = false, reqSound = "RAID_WARNING", reqDuration = 8,
+        reqHighlight = false, reqAlert = false, reqSound = "RAID_WARNING", reqDuration = 8,
     })
     db.off = db.off or {} -- [spell] = true: not shown
     db.extra = db.extra or {} -- [spell name] = cooldown seconds (user additions)
@@ -569,20 +569,46 @@ FF.Init("Cooldowns", function()
         return spell
     end
 
-    local function onWhisper(_, text, sender)
-        if not db.reqHighlight or not (readable(text) and readable(sender)) or type(text) ~= "string" then return end
+    local function wantRequests()
+        return db.reqHighlight or db.reqAlert
+    end
+
+    -- Centre-screen raid warning with spell icon: "Name requested Spell"
+    local function requestAlert(requester, spell)
+        if not db.reqAlert or not spell then return end
+        local icon = spellIcon(spell)
+        local tex = (type(icon) == "number" or type(icon) == "string") and icon or 134400
+        local who = requester or "?"
+        -- |T…|t with 10% crop each edge ≈ 20% zoom (same idea as SetTexCoord 0.1–0.9).
+        FF.Alert(("|T%s:0:0:0:0:64:64:6:58:6:58|t %s requested %s"):format(tex, who, spell))
+    end
+
+    local function onRequest(text, sender)
+        if not wantRequests() or not (readable(text) and readable(sender)) or type(text) ~= "string" then return end
         local spell = parseRequest(text)
         if not spell or not tracked[spell] or not known(spell) then return end -- only requests for my tracked spells
         local key = FF.Key(sender)
         key = key and FF.CanonicalKey(key)
         local unit = key and FF.UnitByKey(key)
         if not unit or UnitIsUnit(unit, "player") then return end -- must be in my group
+        local who = Ambiguate and Ambiguate(sender, "short") or sender:match("^([^-]+)") or sender
+        if db.nicknames then
+            who = FF.NickOr(key, who) or who
+        end
         FF.PlaySound(db.reqSound)
-        M.Highlight(unit, key, spell)
+        if db.reqHighlight then
+            M.Highlight(unit, key, spell)
+        end
+        requestAlert(who, spell)
+    end
+
+    local function onWhisper(_, text, sender)
+        onRequest(text, sender)
     end
 
     local function applyRequest()
-        FF.Listen("CHAT_MSG_WHISPER", onWhisper, db.reqHighlight and true or false)
+        local on = wantRequests()
+        FF.Listen("CHAT_MSG_WHISPER", onWhisper, on and true or false)
         FF.Listen("PLAYER_REGEN_ENABLED", fillPool, db.reqHighlight and true or false)
         if db.reqHighlight then
             fillPool()
@@ -636,14 +662,20 @@ FF.Init("Cooldowns", function()
         L:Header("Requests")
         L:Toggle("Highlight on raid cooldown request", db, "reqHighlight", { onChange = M.ApplyRequest,
             tip = "When someone clicks your cooldown in their window, their whisper puts a border on their raid frame and plays a sound" })
-        local req = function() return db.reqHighlight end
+        L:Toggle("Raid warning on request", db, "reqAlert", { onChange = M.ApplyRequest,
+            tip = "Centre-screen notice with the spell icon: who requested which cooldown" })
+        local req = function() return wantRequests() end
+        local hl = function() return db.reqHighlight end
         L:Select("Request sound", db, "reqSound", FF.SoundChoices, { dep = req, width = 180 })
         L:Buttons({ { "Test sound", function() FF.PlaySound(db.reqSound) end },
             { "Test highlight", function()
                 local n = M.Highlight("player", "_test", "")
                 if n == 0 then FF.print("No raid/party frame found for you (frames must be visible)") end
-            end, "Highlights your own raid frame" } }, { dep = req })
-        L:Slider("Highlight duration (seconds)", db, "reqDuration", 3, 30, 1, { dep = req })
+            end, "Highlights your own raid frame" },
+            { "Test warning", function()
+                requestAlert(UnitName("player") or "You", order[1] or "Innervate")
+            end, "Shows a sample centre-screen request warning" } }, { dep = req })
+        L:Slider("Highlight duration (seconds)", db, "reqDuration", 3, 30, 1, { dep = hl })
 
         L:Header("Tracked spells")
         L:Desc("Everyone running Fresh Fixes reports their own cooldowns. Turn off spells you don't care about.")
