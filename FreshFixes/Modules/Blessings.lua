@@ -49,6 +49,9 @@ FF.Init("Blessings", function()
         activeColorIcon = true,
         -- Timer on blessed cells: "m:ss" | "m" | "h:mm:ss" | "compact"
         timerFormat = "m:ss",
+        -- Centre icon on raid/party frames for players missing your assigned blessing.
+        raidMissingIcon = false,
+        raidMissingIconSize = 18,
     })
     -- Nested tables must be owned by this character's db (not the shared defaults).
     if type(rawget(db, "assign")) ~= "table" then db.assign = {} end
@@ -281,7 +284,7 @@ FF.Init("Blessings", function()
         end
     end
 
-    local refreshPanel, refreshHelper -- forward
+    local refreshPanel, refreshHelper, refreshRaidMissingIcons -- forward
     local panelPending
 
     local function hoverOn(self)
@@ -320,6 +323,7 @@ FF.Init("Blessings", function()
             end)
         end
         if refreshHelper then refreshHelper() end
+        if refreshRaidMissingIcons then refreshRaidMissingIcons() end
     end
 
     local function mySpec()
@@ -2817,11 +2821,208 @@ FF.Init("Blessings", function()
     M.Refresh = changed
 
     ---------------------------------------------------------------------------
+    -- Raid-frame missing-blessing icons (centre of each unit frame).
+    -- Shows the blessing YOU assigned that they still lack (individual override,
+    -- else class assign). If that buff is up and you're offering Salv, shows Salv
+    -- when they're missing it. Insecure overlays; pool grown out of combat.
+    ---------------------------------------------------------------------------
+    local raidIconPool, raidIconLit = {}, {} -- lit[name] = { frames = {}, bless = n }
+    local RAID_ICON_POOL = 48
+    local raidIconPending = false
+
+    local function makeRaidMissIcon()
+        local o = CreateFrame("Frame", nil, UIParent)
+        o:Hide()
+        o:EnableMouse(false)
+        o.tex = o:CreateTexture(nil, "OVERLAY", nil, 7)
+        o.tex:SetAllPoints()
+        o.tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        o.tex:SetAlpha(0.95)
+        return o
+    end
+
+    local function fillRaidIconPool()
+        if InCombatLockdown() then return end
+        while #raidIconPool < RAID_ICON_POOL do
+            raidIconPool[#raidIconPool + 1] = makeRaidMissIcon()
+        end
+    end
+
+    local function releaseRaidIcons(name)
+        local a = raidIconLit[name]
+        if not a then return end
+        for _, o in ipairs(a.frames) do
+            o:Hide()
+            o:ClearAllPoints()
+            raidIconPool[#raidIconPool + 1] = o
+        end
+        raidIconLit[name] = nil
+    end
+
+    local function clearAllRaidIcons()
+        for name in pairs(raidIconLit) do releaseRaidIcons(name) end
+    end
+
+    local function frameUnit(f)
+        local u = f and (f.displayedUnit or f.unit)
+        if type(u) == "string" and readable(u) then return u end
+    end
+
+    local function framesForUnit(unit)
+        local found, seen = {}, {}
+        local function try(f)
+            if f and not seen[f] and f.IsVisible and f:IsVisible() then
+                local u = frameUnit(f)
+                if u and UnitExists(u) and UnitIsUnit(u, unit) then
+                    seen[f] = true
+                    found[#found + 1] = f
+                end
+            end
+        end
+        for i = 1, 40 do try(_G["CompactRaidFrame" .. i]) end
+        for g = 1, 8 do
+            for i = 1, 5 do try(_G["CompactRaidGroup" .. g .. "Member" .. i]) end
+        end
+        for i = 1, 5 do try(_G["CompactPartyFrameMember" .. i]) end
+        local ouf = _G.ElvUF
+        if type(ouf) == "table" and type(ouf.objects) == "table" then
+            for _, f in ipairs(ouf.objects) do
+                local n = f.GetName and f:GetName()
+                if n and (n:find("^ElvUF_Raid") or n:find("^ElvUF_Party")) then try(f) end
+            end
+        end
+        if #found == 0 then
+            local f = EnumerateFrames()
+            local n = 0
+            while f and n < 20000 do
+                n = n + 1
+                if not f:IsForbidden() and rawget(f, "unit") ~= nil then
+                    local name = f:GetName()
+                    local u = frameUnit(f)
+                    if u and (u:find("^raid%d") or u:find("^party%d") or u == "player")
+                        and not (name and name:find("NamePlate")) then
+                        try(f)
+                    end
+                end
+                f = EnumerateFrames(f)
+            end
+        end
+        return found
+    end
+
+    -- Blessing id (1..5) this player is missing from your assigns, or nil if ok / N/A.
+    local function missingBlessFor(name, unit)
+        if not (me and isPally and name and unit) then return end
+        if not UnitIsConnected(unit) or UnitIsDeadOrGhost(unit) then return end
+        local c = CLASSID[unitClass(unit) or ""]
+        if not c then return end
+        local need = blessingFor(me, c, name)
+        if need > 0 and need ~= 4 and need ~= 6 then
+            if auraRem(unit, blessNames(need)) == nil then
+                return need
+            end
+        end
+        if db.salv and knows(1038) and not isTank(unit) then
+            if auraRem(unit, blessNames(4)) == nil then
+                return 4
+            end
+        end
+    end
+
+    local function doRaidMissingIcons()
+        if not (db.raidMissingIcon and isPally and me and IsInGroup()) then
+            clearAllRaidIcons()
+            return
+        end
+        fillRaidIconPool()
+        local size = tonumber(db.raidMissingIconSize) or 18
+        if size < 12 then size = 12 elseif size > 36 then size = 36 end
+        local keep = {}
+        for name, unit in pairs(getRoster()) do
+            local b = missingBlessFor(name, unit)
+            if b then
+                keep[name] = true
+                local prev = raidIconLit[name]
+                if prev and prev.bless ~= b then
+                    releaseRaidIcons(name)
+                    prev = nil
+                end
+                local frames = framesForUnit(unit)
+                if not prev then
+                    local a = { frames = {}, bless = b }
+                    local tex = icon(b)
+                    for _, f in ipairs(frames) do
+                        local o = table.remove(raidIconPool)
+                        if not o then break end
+                        o:SetFrameStrata(f:GetFrameStrata())
+                        o:SetFrameLevel(math.min(10000, f:GetFrameLevel() + 25))
+                        o:ClearAllPoints()
+                        o:SetSize(size, size)
+                        o:SetPoint("CENTER", f, "CENTER", 0, 0)
+                        if tex then o.tex:SetTexture(tex) end
+                        o:Show()
+                        a.frames[#a.frames + 1] = o
+                    end
+                    raidIconLit[name] = a
+                else
+                    -- Refresh size / anchor / texture in case frames moved.
+                    local tex = icon(b)
+                    for i, o in ipairs(prev.frames) do
+                        local f = frames[i]
+                        if f then
+                            o:SetFrameStrata(f:GetFrameStrata())
+                            o:SetFrameLevel(math.min(10000, f:GetFrameLevel() + 25))
+                            o:ClearAllPoints()
+                            o:SetSize(size, size)
+                            o:SetPoint("CENTER", f, "CENTER", 0, 0)
+                            if tex then o.tex:SetTexture(tex) end
+                            o:Show()
+                        else
+                            o:Hide()
+                        end
+                    end
+                    -- Extra frames appeared (e.g. layout change).
+                    for i = #prev.frames + 1, #frames do
+                        local o = table.remove(raidIconPool)
+                        if not o then break end
+                        local f = frames[i]
+                        o:SetFrameStrata(f:GetFrameStrata())
+                        o:SetFrameLevel(math.min(10000, f:GetFrameLevel() + 25))
+                        o:ClearAllPoints()
+                        o:SetSize(size, size)
+                        o:SetPoint("CENTER", f, "CENTER", 0, 0)
+                        if tex then o.tex:SetTexture(tex) end
+                        o:Show()
+                        prev.frames[#prev.frames + 1] = o
+                    end
+                end
+            end
+        end
+        for name in pairs(raidIconLit) do
+            if not keep[name] then releaseRaidIcons(name) end
+        end
+    end
+
+    refreshRaidMissingIcons = function()
+        if raidIconPending then return end
+        raidIconPending = true
+        C_Timer.After(0.2, function()
+            raidIconPending = false
+            doRaidMissingIcons()
+        end)
+    end
+
+    ---------------------------------------------------------------------------
     -- Events
     ---------------------------------------------------------------------------
     local function onAura(_, unit)
-        if helper and helper:IsShown() and type(unit) == "string" and (unit == "player" or unit:find("^raid") or unit:find("^party")) then
+        if type(unit) ~= "string" then return end
+        if not (unit == "player" or unit:find("^raid") or unit:find("^party")) then return end
+        if helper and helper:IsShown() then
             refreshHelper()
+        end
+        if db.raidMissingIcon then
+            refreshRaidMissingIcons()
         end
     end
     local wasInGroup = false
@@ -2841,12 +3042,18 @@ FF.Init("Blessings", function()
             for n in pairs(pals) do if n ~= me then pals[n] = nil end end
             wipe(leaders)
             last = nil
+            clearAllRaidIcons()
         end
         wasInGroup = inGroup
         changed()
+        refreshRaidMissingIcons()
     end
     FF.On("GROUP_ROSTER_UPDATE", onRoster)
-    FF.On("PLAYER_REGEN_ENABLED", function() changed() end)
+    FF.On("PLAYER_REGEN_ENABLED", function()
+        fillRaidIconPool()
+        changed()
+        refreshRaidMissingIcons()
+    end)
     FF.On("SPELLS_CHANGED", function()
         if isPally and IsInGroup() then sendSelfSoon() end
     end)
@@ -2857,11 +3064,16 @@ FF.Init("Blessings", function()
         onRoster()
         if db.panel then M.TogglePanel(true) end
         refreshHelper()
+        fillRaidIconPool()
+        refreshRaidMissingIcons()
     end)
 
     -- Timers: light expand paint every tick; full helper rebuild less often.
     local helperTick = 0
     C_Timer.NewTicker(1, function()
+        if db.raidMissingIcon and isPally and IsInGroup() then
+            doRaidMissingIcons()
+        end
         if not (helper and helper:IsShown() and db.helper) then return end
         helperTick = helperTick + 1
         if helper.expand and helper.expand:IsShown() and paintExpandButton then
@@ -2914,6 +3126,24 @@ FF.Init("Blessings", function()
             fmt = function(v) return v .. " px" end,
             tip = "Width of the hover-expanded individual player rows. Long names cut off; the timer always stays fully visible.",
         })
+        L:Header("Raid frames")
+        L:Toggle("Missing blessing icon on raid frames", db, "raidMissingIcon", {
+            onChange = function()
+                if db.raidMissingIcon then
+                    fillRaidIconPool()
+                    refreshRaidMissingIcons()
+                else
+                    clearAllRaidIcons()
+                end
+            end,
+            tip = "Centre of each player's raid/party frame shows the blessing you assigned that they still need. Salv shows if their main bless is up and you're offering Salv.",
+        })
+        L:Slider("Raid missing icon size", db, "raidMissingIconSize", 12, 36, 2, {
+            dep = function() return db.raidMissingIcon end,
+            onChange = refreshRaidMissingIcons,
+            fmt = function(v) return v .. " px" end,
+        })
+
         L:Header("Active buff indicator")
         L:Desc("Red = everyone missing. Orange = some missing (keeps lowest timer). Green = all buffed.")
         L:Toggle("Border colour", db, "activeBorder", {

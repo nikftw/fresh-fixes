@@ -19,7 +19,7 @@ FF.Init("QoL", function()
         tipGuildRank = true, tipTarget = true, tipHideInCombat = false,
         -- system
         noScreenEffects = false, combatPlates = false, noConfirmLoot = false, fasterMovieSkip = true,
-        quietRestedEmotes = false, keepAudioSynced = false, trainAll = true, lootSparkles = true,
+        quietRestedEmotes = false, keepAudioSynced = false, trainAll = true,
     })
     db.mute = db.mute or {} -- [soundFileID] = true
 
@@ -369,35 +369,6 @@ FF.Init("QoL", function()
     end
     FF.On("FF_READY", applyFonts)
 
-    -- Loot sparkles: the sparkle effect on lootable corpses, with outlines off.
-    -- The previous values are kept so turning it off puts them back.
-    local SPARKLE_CVARS = {
-        outlineModeShowLootEffectWhenDisabled = "1", graphicsOutlineMode = "0", OutlineEngineMode = "0",
-        raidGraphicsOutlineMode = "0", RAIDOutlineEngineMode = "0",
-    }
-    local function applySparkles()
-        if db.lootSparkles then
-            db.sparkleSaved = db.sparkleSaved or {}
-            for cvar, v in pairs(SPARKLE_CVARS) do
-                local ok, cur = pcall(GetCVar, cvar)
-                if ok and cur ~= nil and db.sparkleSaved[cvar] == nil and cur ~= v then
-                    db.sparkleSaved[cvar] = cur
-                end
-                pcall(SetCVar, cvar, v)
-            end
-        elseif db.sparkleSaved then
-            for cvar, v in pairs(db.sparkleSaved) do
-                pcall(SetCVar, cvar, v)
-            end
-            db.sparkleSaved = nil
-        end
-    end
-    FF.On("FF_READY", function()
-        if db.lootSparkles then
-            applySparkles()
-        end
-    end)
-
     FF.Settings("QoL", function(L)
         local main = FF.modules.QoL.main
         local mdb = main.db
@@ -462,17 +433,12 @@ FF.Init("QoL", function()
         T("Hide world units in combat", db, "tipHideInCombat", nil, "Hold Shift to show them")
 
         L:Header("Camera and graphics")
-        T("Extended camera distance", mdb, "maxCamera", main.applyCamera)
-        L:Slider("Max distance factor", mdb, "cameraFactor", 1, 2.6, 0.1, { dep = function() return mdb.maxCamera end,
-            onChange = main.applyCamera, indent = 12 })
         T("Disable screen glow", mdb, "noScreenGlow", main.applyGlow)
         T("No death screen effects", db, "noScreenEffects", applySystem)
         T("Enemy nameplates only in combat", db, "combatPlates")
         L:Slider("Weather density", db, "weather", 0, 3, 1, { onChange = applyFonts,
             fmt = function(v) return v and tostring(v) or "game" end })
         T("Escape skips cinematics instantly", db, "fasterMovieSkip")
-        L:Toggle("Loot sparkles (items and corpses)", db, "lootSparkles", { onChange = applySparkles,
-            tip = "Shows the loot sparkle effect with outlines turned off. Turning it off restores your previous outline settings." })
 
         L:Header("Sound")
         T("Silence emote sounds while resting", db, "quietRestedEmotes")

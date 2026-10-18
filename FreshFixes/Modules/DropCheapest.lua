@@ -10,6 +10,7 @@ FF.Init("DropCheapest", function()
         maxQuality = 0,
         skipBound = true,
         showCount = 4,
+        hideBackground = false,
     })
     if type(rawget(db, "showCount")) ~= "number" then db.showCount = 4 end
     db.width = nil -- retired: width follows icon count
@@ -18,6 +19,7 @@ FF.Init("DropCheapest", function()
     local GAP = 2
     local PAD = 4
     local HEAD = 18
+    local PRICE_H = 14
 
     local CC = C_Container or {}
     local numSlots = CC.GetContainerNumSlots or GetContainerNumSlots
@@ -46,13 +48,36 @@ FF.Init("DropCheapest", function()
         end
     end
 
+    local function vendorPrice(link, itemID)
+        -- Prefer GetItemInfo sellPrice (11th return). Optional Forever helpers next.
+        local _, _, _, _, _, _, _, _, _, _, price = getItemInfo(link or itemID)
+        if type(price) == "number" and price > 0 then
+            return price
+        end
+        if C_Item then
+            for _, fn in ipairs({ C_Item.GetItemSellPriceByID, C_Item.GetItemSellPrice }) do
+                if type(fn) == "function" then
+                    local ok, p = pcall(fn, itemID or link)
+                    if ok and type(p) == "number" and p > 0 then
+                        return p
+                    end
+                end
+            end
+        end
+        return type(price) == "number" and price or 0
+    end
+
     local function resolveItem(link, itemID, quality)
-        local name, _, q, _, _, _, _, _, _, texture, price, classID = getItemInfo(link or itemID)
+        local name, _, q, _, _, _, _, _, _, texture, sell, classID = getItemInfo(link or itemID)
         if not name and itemID and C_Item and C_Item.RequestLoadItemDataByID then
             pcall(C_Item.RequestLoadItemDataByID, itemID)
         end
         if quality == nil or quality < 0 then quality = q end
-        return name, quality, texture, price or 0, classID
+        local price = type(sell) == "number" and sell or 0
+        if price <= 0 then
+            price = vendorPrice(link, itemID)
+        end
+        return name, quality, texture, price, classID
     end
 
     local function bagFree()
@@ -106,8 +131,35 @@ FF.Init("DropCheapest", function()
     M.Find = find
     M.FindAll = findAll
 
+    -- Plain text for the icon row (custom fonts can break |T coin textures mid-refresh).
+    local function moneyPlain(v)
+        v = tonumber(v) or 0
+        if v <= 0 then
+            return "-"
+        end
+        local g = math.floor(v / 10000)
+        local s = math.floor((v % 10000) / 100)
+        local c = v % 100
+        if g > 0 then
+            return ("%dg%02ds"):format(g, s)
+        end
+        if s > 0 then
+            return ("%ds%02dc"):format(s, c)
+        end
+        return ("%dc"):format(c)
+    end
     local function money(v)
-        return v > 0 and GetCoinTextureString(v) or "no value"
+        v = tonumber(v) or 0
+        if v <= 0 then
+            return "no value"
+        end
+        if type(GetCoinTextureString) == "function" then
+            local ok, text = pcall(GetCoinTextureString, v)
+            if ok and type(text) == "string" then
+                return text
+            end
+        end
+        return moneyPlain(v)
     end
     local function describe(it)
         return ("%s%s (%s)"):format(it.link, it.count > 1 and ("x" .. it.count) or "", money(it.value))
@@ -194,7 +246,13 @@ FF.Init("DropCheapest", function()
 
     local function iconBtn(i)
         local b = icons[i]
-        if b then return b end
+        if b then
+            if not b.price then
+                b.price = FF.Text(win, "small")
+                b.price:SetJustifyH("CENTER")
+            end
+            return b
+        end
         b = CreateFrame("Button", nil, win)
         b:SetSize(ICON, ICON)
         FF.Skin(b, "row")
@@ -203,13 +261,16 @@ FF.Init("DropCheapest", function()
         b.tex:SetPoint("TOPLEFT", 1, -1)
         b.tex:SetPoint("BOTTOMRIGHT", -1, 1)
         b.tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        b.price = FF.Text(win, "small")
+        b.price:SetJustifyH("CENTER")
         b:SetScript("OnEnter", function(self)
             if not self.it then return end
             FF.SetBorder(self, C.accent)
             GameTooltip:SetOwner(self, "ANCHOR_LEFT")
             GameTooltip:SetHyperlink(self.it.link)
             GameTooltip:AddLine(" ")
-            GameTooltip:AddLine("Click to delete · " .. money(self.it.value), 0.2, 1, 0.2)
+            GameTooltip:AddLine("Vendor: " .. money(self.it.value), 1, 0.82, 0)
+            GameTooltip:AddLine("Click to delete", 0.2, 1, 0.2)
             GameTooltip:Show()
         end)
         b:SetScript("OnLeave", function(self)
@@ -226,7 +287,7 @@ FF.Init("DropCheapest", function()
     local function build()
         if win then return end
         local n = showCount()
-        win = UI.Display("DropCheapest", frameW(n), HEAD + GAP + ICON + PAD, { "BOTTOMRIGHT", -320, 120 })
+        win = UI.Display("DropCheapest", frameW(n), PAD + HEAD + GAP + ICON + PRICE_H + PAD, { "BOTTOMRIGHT", -320, 120 })
         win:EnableMouse(true)
         win:RegisterForDrag("LeftButton")
         win:SetScript("OnDragStart", function(self)
@@ -253,6 +314,15 @@ FF.Init("DropCheapest", function()
         win.slots:SetJustifyH("LEFT")
     end
 
+    local function applyChrome()
+        if not win then
+            return
+        end
+        if win.ffBg then
+            win.ffBg:SetShown(not db.hideBackground)
+        end
+    end
+
     function M.Refresh()
         if not win or not win:IsShown() then return end
         local n = showCount()
@@ -264,30 +334,40 @@ FF.Init("DropCheapest", function()
 
         local w = math.max(frameW(shown), 72)
         win:SetWidth(w)
-        win:SetHeight(PAD + HEAD + GAP + ICON + PAD)
+        win:SetHeight(PAD + HEAD + GAP + ICON + PRICE_H + PAD)
 
         for i = 1, 12 do
             local b = iconBtn(i)
             if i <= shown then
                 local it = list[i]
+                local x = PAD + (i - 1) * (ICON + GAP)
+                local y = -(PAD + HEAD + GAP)
                 b:ClearAllPoints()
-                b:SetPoint("TOPLEFT", PAD + (i - 1) * (ICON + GAP), -(PAD + HEAD + GAP))
+                b:SetPoint("TOPLEFT", x, y)
                 b:Show()
+                b.price:ClearAllPoints()
+                b.price:SetPoint("TOP", win, "TOPLEFT", x + ICON / 2, y - ICON - 1)
+                b.price:SetWidth(math.max(ICON + GAP * 2, 40))
                 if it then
                     b.it = it
                     b.tex:SetTexture(it.texture or "Interface\\Icons\\INV_Misc_QuestionMark")
                     b.tex:SetVertexColor(1, 1, 1, 1)
                     b.tex:Show()
+                    b.price:SetText(moneyPlain(it.value))
+                    b.price:Show()
                     b:SetAlpha(1)
                     b:EnableMouse(true)
                 else
                     b.it = nil
                     b.tex:Hide()
+                    b.price:SetText("")
+                    b.price:Hide()
                     b:SetAlpha(0.45)
                     b:EnableMouse(false)
                 end
             else
                 b.it = nil
+                if b.price then b.price:Hide() end
                 b:Hide()
             end
         end
@@ -299,6 +379,7 @@ FF.Init("DropCheapest", function()
             return
         end
         build()
+        applyChrome()
         win:Show()
         M.Refresh()
     end
@@ -318,8 +399,19 @@ FF.Init("DropCheapest", function()
 
     FF.Settings("DropCheapest", function(L)
         L:Header("Drop cheapest item")
-        L:Desc("Shows free bag slots and the cheapest junk icons. Left-click an icon to delete. Quest items are never touched; anything above grey always asks first. Shift-drag to move.")
+        L:Desc("Shows free bag slots and the cheapest junk icons with vendor sell price. Left-click an icon to delete. Quest items are never touched; anything above grey always asks first. Shift-drag to move.")
         L:Toggle("Show the drop window", db, "button", { onChange = M.Apply })
+        L:Toggle("Hide window background", db, "hideBackground", {
+            onChange = function()
+                if win then
+                    applyChrome()
+                else
+                    M.Apply()
+                end
+            end,
+            tip = "Off by default. On leaves only the bag count, icons, and prices.",
+            dep = function() return db.button end,
+        })
         L:Slider("Icons to show", db, "showCount", 1, 12, 1, {
             onChange = M.Apply,
             fmt = function(v) return tostring(v) end,

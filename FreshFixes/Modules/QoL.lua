@@ -23,9 +23,9 @@ FF.Init("QoL", function()
         repair = true, guildRepair = true, sellJunk = true, fasterLoot = true,
         declineDuels = false, declineGuildInvites = false, acceptGroupInvites = false,
         acceptSummons = false, acceptResurrect = false, autoReleasePvP = false,
-        maxCamera = true, hideErrors = false, autoQuests = true, skipGossip = true,
+        hideErrors = false, autoQuests = true, skipGossip = true,
         easyDelete = true, noScreenGlow = true, hideGryphons = false,
-        repairSummary = false, sellSummary = false, cameraFactor = 2.6,
+        repairSummary = false, sellSummary = false,
     })
 
     local numSlots, useItem = C_Container.GetContainerNumSlots, C_Container.UseContainerItem
@@ -233,12 +233,6 @@ FF.Init("QoL", function()
     ---------------------------------------------------------------------------
     -- Settings applied once (and when toggled)
     ---------------------------------------------------------------------------
-    local function applyCamera()
-        if db.maxCamera then
-            SetCVar("cameraDistanceMaxZoomFactor", db.cameraFactor)
-        end
-    end
-
     local function applyErrors()
         if not UIErrorsFrame then
             return
@@ -286,7 +280,6 @@ FF.Init("QoL", function()
     end
 
     FF.On("FF_READY", function()
-        applyCamera()
         applyErrors()
         applyGlow()
         applyGryphons()
@@ -295,7 +288,7 @@ FF.Init("QoL", function()
 
     -- The settings page (QoL_Extra.lua) needs these
     M.main = {
-        db = db, applyCamera = applyCamera, applyErrors = applyErrors,
+        db = db, applyErrors = applyErrors,
         applyGlow = applyGlow, applyGryphons = applyGryphons,
     }
 end)

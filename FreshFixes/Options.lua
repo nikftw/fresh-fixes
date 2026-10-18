@@ -11,7 +11,7 @@ function FF.Settings(key, builder)
     builders[key] = builder
 end
 
-local NAV_W, WIN_W, WIN_H = 210, 820, 560
+local NAV_W, WIN_W, WIN_H = 210, 820, 570
 
 local function entries()
     local list = {}

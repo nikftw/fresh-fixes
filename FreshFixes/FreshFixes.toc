@@ -2,7 +2,7 @@
 ## Title: Fresh Fixes
 ## Notes: Guild raid & QoL toolkit
 ## Author: Fresh Fixes
-## Version: 0.6.0
+## Version: 0.7.0
 ## SavedVariables: FreshFixesDB
 ## OptionalDeps: EllesmereUI
 ## IconTexture: Interface\Icons\INV_Misc_Note_06
@@ -30,6 +30,8 @@ Modules\MapIcons.lua
 Modules\Map.lua
 Modules\MapReveal.lua
 MapPins.xml
+Modules\GraphicsCatalog.lua
+Modules\Graphics.lua
 Modules\MouseRing.lua
 Modules\CoTank.lua
 Modules\Summon.lua

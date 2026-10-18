@@ -209,6 +209,7 @@ FF.catalog = {
     { key = "Cooldowns", icon = "Interface\\Icons\\Spell_Holy_DivineIntervention", default = false, title = "Raid Cooldowns", desc = "Tracks raid cooldowns shared by everyone running Fresh Fixes." },
     { key = "QoL", icon = "Interface\\Icons\\INV_Misc_Wrench_01", default = true, title = "Quality of Life", desc = "Auto-repair, sell junk, faster loot and other Leatrix-style tweaks." },
     { key = "Map", icon = "Interface\\Icons\\INV_Misc_Map_01", default = true, title = "Map", desc = "Unexplored areas, map icons, scale, fade and unlocking the world map." },
+    { key = "Graphics", icon = "Interface\\Icons\\Ability_EyeOfTheOwl", default = false, title = "Graphics", desc = "Visibility-focused graphics presets and CVars (from Forever Visibility), including camera and self-highlight." },
     { key = "MouseRing", icon = "Interface\\Icons\\Ability_Marksmanship", default = false, title = "Mouse Ring", desc = "Rings around the cursor: plain, global cooldown, cast bar or spell cooldown, plus trail and melee warning." },
     { key = "CoTank", icon = "Interface\\Icons\\INV_Shield_06", default = false, title = "Co-Tank Frame", desc = "Small clickable frame for the other tank." },
     { key = "Summon", icon = "Interface\\Icons\\Spell_Shadow_Twilight", default = false, title = "Summons", desc = "Ritual of Summoning announcements and a '123' summon queue." },
