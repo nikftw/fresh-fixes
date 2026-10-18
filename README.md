@@ -2,6 +2,8 @@
 
 Guild raid and quality-of-life toolkit for **WoW Forever** (Interface `16001`). Toggle modules in `/ff`, then `/reload` when you turn one on.
 
+![Fresh Fixes settings](docs/settings.png)
+
 ## Install
 
 Copy the `FreshFixes` folder into:
