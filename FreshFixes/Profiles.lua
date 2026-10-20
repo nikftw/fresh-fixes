@@ -14,9 +14,9 @@ local KIND, SCHEMA = "PROFILE", 1
 local DEFAULT_NAME = "Default"
 local META = { profiles = true, profileOf = true, activeProfile = true, defaultProfile = true, pendingApply = true }
 local DATA = {
-    nicknames = { map = true, names = true, senders = true, mine = true },
+    nicknames = { map = true, names = true },
     -- Raid assignment state — kept across reload, not part of a settings profile
-    blessings = { assign = true, normal = true, aura = true },
+    blessings = { assign = true, normal = true },
 }
 
 local function copy(v)
@@ -88,9 +88,7 @@ local function store()
     local db = FreshFixesDB
     db.profiles = db.profiles or {}
     db.profileOf = db.profileOf or {}
-    if not db.defaultProfile or db.defaultProfile == "" then
-        db.defaultProfile = DEFAULT_NAME
-    end
+    db.defaultProfile = db.defaultProfile or DEFAULT_NAME
     return db
 end
 
@@ -115,27 +113,10 @@ function FF.ProfileLogin()
         apply(db.profiles[db.activeProfile] or {})
     end
     local me = charKey()
-    -- Older builds named the first profile after the character. Keep those
-    -- settings and call the profile Default.
-    if not db.profiles[DEFAULT_NAME] then
-        local current = db.profileOf[me] or db.activeProfile
-        if current == me and db.profiles[current] then
-            db.profiles[DEFAULT_NAME] = db.profiles[current]
-            db.profiles[current] = nil
-            for char, name in pairs(db.profileOf) do
-                if name == current then
-                    db.profileOf[char] = DEFAULT_NAME
-                end
-            end
-            if db.activeProfile == current then
-                db.activeProfile = DEFAULT_NAME
-            end
-        end
-    end
     local want = db.profileOf[me]
     if not want or (not db.profiles[want] and want ~= db.activeProfile) then
         local d = db.defaultProfile
-        want = (d and d ~= "" and (db.profiles[d] or d == DEFAULT_NAME)) and d or DEFAULT_NAME
+        want = db.profiles[d] and d or DEFAULT_NAME
     end
     db.activeProfile = db.activeProfile or want -- first run: the live settings are fresh
     db.profileOf[me] = want

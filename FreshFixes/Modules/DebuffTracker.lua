@@ -92,29 +92,9 @@ FF.Init("DebuffTracker", function()
         showDuration = true,
         iconSize = 28,
         textSize = 12,
-        show = {},
-        custom = {}, -- { { id = number, show = true }, ... }
     })
     db.show = db.show or {}
-    db.custom = db.custom or {}
-    if type(rawget(db, "textSize")) ~= "number" then
-        db.textSize = 12
-    end
-    -- One-time: default size 28; Insect Swarm / MS / Mind-numbing off.
-    if not db._ui2 then
-        db._ui2 = true
-        if db.iconSize == nil or db.iconSize == 36 or db.iconSize == 26 then
-            db.iconSize = 28
-        end
-        for k in pairs(OFF_BY_DEFAULT) do
-            db.show[k] = false
-        end
-    elseif db.iconSize == 26 then
-        db.iconSize = 28
-    end
-    if type(rawget(db, "iconSize")) ~= "number" then
-        db.iconSize = 28
-    end
+    db.custom = db.custom or {} -- { { id = number, show = true }, ... }
     for _, slot in ipairs(BUILTIN) do
         if db.show[slot.key] == nil then
             db.show[slot.key] = not OFF_BY_DEFAULT[slot.key]
@@ -140,12 +120,7 @@ FF.Init("DebuffTracker", function()
         if not spellID then
             return nil
         end
-        local ok, info = pcall(function()
-            if C_Spell and C_Spell.GetSpellTexture then
-                return C_Spell.GetSpellTexture(spellID)
-            end
-            return GetSpellTexture and GetSpellTexture(spellID)
-        end)
+        local ok, info = pcall(C_Spell.GetSpellTexture, spellID)
         if ok and info then
             return info
         end
@@ -203,23 +178,12 @@ FF.Init("DebuffTracker", function()
         if not UnitExists("target") then
             return found
         end
-        local getAura = C_UnitAuras and C_UnitAuras.GetAuraDataByIndex
-        local i = 1
-        while i <= 40 do
-            local spellId, expires, icon, stacks, name
-            if getAura then
-                local a = getAura("target", i, "HARMFUL")
-                if not a then
-                    break
-                end
-                spellId, expires, icon, stacks, name = a.spellId, a.expirationTime, a.icon, a.applications, a.name
-            else
-                local n, _, ic, count, _, _, exp, _, _, _, id = UnitDebuff("target", i)
-                if not n then
-                    break
-                end
-                spellId, expires, icon, stacks, name = id, exp, ic, count, n
+        for i = 1, 40 do
+            local a = C_UnitAuras.GetAuraDataByIndex("target", i, "HARMFUL")
+            if not a then
+                break
             end
+            local spellId, expires, icon, stacks, name = a.spellId, a.expirationTime, a.icon, a.applications, a.name
             local meta = spellId and idMap[spellId]
             if meta then
                 local cur = found[meta.key]
@@ -237,7 +201,6 @@ FF.Init("DebuffTracker", function()
                     }
                 end
             end
-            i = i + 1
         end
         return found
     end
@@ -438,14 +401,17 @@ FF.Init("DebuffTracker", function()
         end
     end
 
-    FF.On("FF_READY", M.Apply)
-    FF.On("PLAYER_TARGET_CHANGED", M.Refresh)
-    FF.On("UNIT_AURA", function(_, unit)
-        if unit == "target" then
-            M.Refresh()
-        end
+    -- the game sends this frame only the target's aura changes
+    local events = CreateFrame("Frame")
+    events:SetScript("OnEvent", function()
+        M.Refresh()
     end)
-    FF.On("PLAYER_ENTERING_WORLD", M.Apply)
+    FF.On("FF_READY", function()
+        events:RegisterEvent("PLAYER_TARGET_CHANGED")
+        events:RegisterUnitEvent("UNIT_AURA", "target")
+        M.Apply()
+    end)
+    FF.On("FF_ZONE", M.Apply)
 
     FF.Command("debuffs", function(arg)
         arg = (arg or ""):lower()

@@ -139,8 +139,7 @@ function FF.IsFriendOrGuild(name)
     if not name or not readable(name) then
         return false
     end
-    local key = FF.Key(name)
-    if key and FF.GuildRoster()[key] then
+    if FF.GuildMember(name) then
         return true
     end
     local ok, friend = pcall(C_FriendList.IsFriend, name)

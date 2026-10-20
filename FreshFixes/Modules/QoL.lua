@@ -23,7 +23,7 @@ FF.Init("QoL", function()
         repair = true, guildRepair = true, sellJunk = true, fasterLoot = true,
         declineDuels = false, declineGuildInvites = false, acceptGroupInvites = false,
         acceptSummons = false, acceptResurrect = false, autoReleasePvP = false,
-        hideErrors = false, autoQuests = true, skipGossip = true,
+        hideErrors = true, autoQuests = true, skipGossip = true,
         easyDelete = true, noScreenGlow = true, hideGryphons = false,
         repairSummary = false, sellSummary = false,
     })

@@ -14,7 +14,7 @@ FF.Init("Cooldowns", function()
         width = 200, perColumn = 12, columns = 3, locked = true, showSpellName = false, showTitle = true,
         sortBy = "spellReady", readyFirst = false, reverse = false,
         clickCall = true, barFills = false, showLastOn = true, barRight = true, nicknames = true,
-        reqHighlight = false, reqAlert = false, reqClickCast = false,
+        reqHighlight = false, reqAlert = false,
         reqSound = "RAID_WARNING", reqDuration = 8, reqIconSize = 48, reqGlow = "solid",
     })
     db.off = db.off or {} -- [spell] = true: not shown
@@ -418,11 +418,10 @@ FF.Init("Cooldowns", function()
     ---------------------------------------------------------------------------
     -- Highlight on request: whisper ("<Spell> please") borders the requester's
     -- raid frame (glow style: solid / dotted / soft / off) and optionally shows
-    -- a centre popup with a sized icon that can be a secure cast button.
+    -- a movable centre popup with the spell icon.
     ---------------------------------------------------------------------------
     local C = FF.C
-    local pool, lit = {}, {} -- lit[senderKey] = { frames = {}, spell, timer }
-    local POOL = 8
+    local pool, lit = {}, {} -- released overlays; lit[senderKey] = { frames = {}, spell, timer }
     local GLOW_STYLES = {
         { "solid", "Solid border" },
         { "dotted", "Dotted border" },
@@ -507,177 +506,89 @@ FF.Init("Cooldowns", function()
         o:SetScript("OnSizeChanged", layoutOverlay)
         return o
     end
-    local function fillPool()
-        if InCombatLockdown() then return end
-        while #pool < POOL do pool[#pool + 1] = makeOverlay() end
-    end
 
-    -- Visual popup is insecure (can show/hide in combat). The cast button is a
-    -- separate SecureActionButton on UIParent — Blizzard only allows binding
-    -- spell/unit out of combat, so in-combat requests show the icon but click-
-    -- to-cast arms when combat ends (or if it was already wired beforehand).
-    local reqPopup, castBtn, pendingCast
-
-    local function clearCastBtn()
-        if not castBtn or InCombatLockdown() then return end
-        castBtn:SetAttribute("type", nil)
-        castBtn:SetAttribute("macrotext", nil)
-        castBtn:SetAttribute("spell", nil)
-        castBtn:SetAttribute("unit", nil)
-        castBtn:Hide()
-        castBtn:EnableMouse(false)
-        castBtn._armedSpell = nil
-        castBtn._armedUnit = nil
-    end
-
-    local function placeCastBtn()
-        if not (castBtn and reqPopup and reqPopup.icon) then return end
-        if InCombatLockdown() then return end -- protected: can't move/show in combat
-        local size = reqPopup.icon:GetWidth() or 48
-        castBtn:SetSize(size, size)
-        castBtn:ClearAllPoints()
-        castBtn:SetPoint("CENTER", reqPopup.icon, "CENTER")
-        castBtn:SetFrameStrata(reqPopup:GetFrameStrata())
-        castBtn:SetFrameLevel(reqPopup:GetFrameLevel() + 5)
-    end
-
-    local function macroFor(spell, unit)
-        if unit == "player" then
-            return "/cast " .. spell
-        end
-        return ("/cast [@%s,help,nodead] %s"):format(unit, spell)
-    end
-
-    local function wireCastBtn()
-        if not castBtn then return end
-        if not (db.reqClickCast and pendingCast and reqPopup and reqPopup:IsShown()) then
-            clearCastBtn()
-            return
-        end
-        -- Already armed for this request before combat: leave it clickable.
-        if InCombatLockdown() then
-            local armed = castBtn._armedSpell == pendingCast.spell
-                and castBtn._armedUnit == pendingCast.unit
-                and castBtn:IsShown()
-            castBtn:EnableMouse(armed and true or false)
-            return
-        end
-        placeCastBtn()
-        castBtn:SetAttribute("type", "macro")
-        castBtn:SetAttribute("macrotext", macroFor(pendingCast.spell, pendingCast.unit))
-        castBtn._armedSpell = pendingCast.spell
-        castBtn._armedUnit = pendingCast.unit
-        castBtn:EnableMouse(true)
-        castBtn:Show()
-    end
+    -- Centre-screen request warning: who wants which cooldown. Unlock it to
+    -- drag it anywhere; the position is saved.
+    local reqPopup, pendingSpell
 
     local function hideReqPopup()
-        if reqPopup and reqPopup.timer then
-            reqPopup.timer:Cancel()
-            reqPopup.timer = nil
+        pendingSpell = nil
+        if reqPopup then
+            if reqPopup.timer then
+                reqPopup.timer:Cancel()
+                reqPopup.timer = nil
+            end
+            if not reqPopup.unlocked then
+                reqPopup:Hide()
+            end
         end
-        pendingCast = nil
-        if reqPopup then reqPopup:Hide() end
-        clearCastBtn()
     end
 
     local function ensureReqPopup()
-        if reqPopup then return reqPopup end
-
-        -- Insecure visual (safe to show/resize in combat).
+        if reqPopup then
+            return reqPopup
+        end
         local f = CreateFrame("Frame", "FreshFixesCDRequest", UIParent)
         f:SetFrameStrata("DIALOG")
-        f:SetFrameLevel(200)
-        f:SetSize(280, 80)
-        f:SetPoint("CENTER", 0, 120)
-        f:Hide()
+        f:SetClampedToScreen(true)
+        f:SetMovable(true)
         f:EnableMouse(false)
-
-        local icon = f:CreateTexture(nil, "ARTWORK")
-        icon:SetPoint("LEFT", 0, 0)
-        icon:SetTexCoord(0.1, 0.9, 0.1, 0.9)
-        f.icon = icon
-
-        local label = FF.Text(f, "normal")
-        label:SetPoint("LEFT", icon, "RIGHT", 10, 0)
-        label:SetPoint("RIGHT", f, "RIGHT", 0, 0)
-        label:SetJustifyH("LEFT")
-        label:SetWordWrap(true)
-        f.label = label
-
-        -- Tip target when the secure button isn't covering the icon (combat / click-cast off).
-        local hit = CreateFrame("Frame", nil, f)
-        hit:SetAllPoints(icon)
-        hit:EnableMouse(true)
-        hit:SetScript("OnEnter", function(self)
-            if not pendingCast then return end
-            local tip
-            if not db.reqClickCast then
-                tip = pendingCast.spell
-            elseif InCombatLockdown() then
-                tip = ("Click to cast after combat\n%s on %s"):format(pendingCast.spell, pendingCast.who or "?")
-            else
-                tip = ("Click to cast %s on %s"):format(pendingCast.spell, pendingCast.who or "?")
-            end
-            FF.Tip(self, tip, "Cooldown request")
+        f:RegisterForDrag("LeftButton")
+        f:SetScript("OnDragStart", f.StartMoving)
+        f:SetScript("OnDragStop", function(self)
+            self:StopMovingOrSizing()
+            FF.SavePosition(self, "CDRequest")
         end)
-        hit:SetScript("OnLeave", FF.HideTip)
-        f.hit = hit
-
-        -- Secure cast button lives on UIParent so showing the visual in combat
-        -- doesn't require moving a protected parent tree.
-        local btn = CreateFrame("Button", "FreshFixesCDRequestBtn", UIParent, "SecureActionButtonTemplate")
-        btn:SetFrameStrata("DIALOG")
-        btn:SetFrameLevel(210)
-        btn:RegisterForClicks("AnyUp", "AnyDown")
-        btn:Hide()
-        btn:EnableMouse(false)
-        btn:SetScript("OnEnter", function(self)
-            if not pendingCast then return end
-            FF.Tip(self, ("Click to cast %s on %s"):format(pendingCast.spell, pendingCast.who or "?"), "Cooldown request")
-        end)
-        btn:SetScript("OnLeave", FF.HideTip)
-        -- Out of combat: refresh bind on each click (roster unit tokens can move).
-        btn:SetScript("PreClick", function(self)
-            if InCombatLockdown() or not pendingCast or not db.reqClickCast then return end
-            self:SetAttribute("type", "macro")
-            self:SetAttribute("macrotext", macroFor(pendingCast.spell, pendingCast.unit))
-        end)
-
-        castBtn = btn
+        FF.RestorePosition(f, "CDRequest", "CENTER", 0, 120)
+        f.shade = f:CreateTexture(nil, "BACKGROUND") -- only while unlocked
+        f.shade:SetAllPoints()
+        f.shade:SetColorTexture(0, 0, 0, 0.5)
+        f.shade:Hide()
+        f.icon = f:CreateTexture(nil, "ARTWORK")
+        f.icon:SetPoint("LEFT", 0, 0)
+        f.icon:SetTexCoord(0.1, 0.9, 0.1, 0.9)
+        f.label = FF.Text(f, "normal")
+        f.label:SetPoint("LEFT", f.icon, "RIGHT", 10, 0)
+        f.label:SetPoint("RIGHT", f, "RIGHT", 0, 0)
+        f.label:SetJustifyH("LEFT")
+        f.label:SetWordWrap(true)
+        f:Hide()
         reqPopup = f
         return f
     end
 
-    -- Personal CDs cast on self; everything else in the list is aimed at the requester.
-    local SELF_CAST = {
-        ["Reincarnation"] = true, ["Mana Tide Totem"] = true, ["Tranquility"] = true,
-        ["Shield Wall"] = true, ["Last Stand"] = true, ["Retaliation"] = true,
-        ["Recklessness"] = true, ["Challenging Shout"] = true, ["Challenging Roar"] = true,
-        ["Divine Shield"] = true, ["Ice Block"] = true, ["Evocation"] = true,
-    }
-
-    local function requestAlert(who, spell, unit)
-        if not db.reqAlert or not spell then return end
-        local f = ensureReqPopup()
-        if f.timer then f.timer:Cancel() end
-        local size = tonumber(db.reqIconSize) or 48
-        if size < 24 then size = 24 elseif size > 96 then size = 96 end
+    local function fillPopup(f, spell, text)
+        local size = math.max(24, math.min(96, tonumber(db.reqIconSize) or 48))
         f.icon:SetSize(size, size)
         f.icon:SetTexture(spellIcon(spell))
         f:SetSize(math.max(220, size + 200), math.max(size + 8, 56))
-        local castUnit = (SELF_CAST[spell] or not unit) and "player" or unit
-        local tipWho = castUnit == "player" and "yourself" or (who or "?")
-        local line = ("%s requested\n%s"):format(who or "?", spell)
-        if db.reqClickCast and InCombatLockdown() then
-            line = line .. "\n|cffaaaaaaClick-cast after combat|r"
-        end
-        f.label:SetText(line)
-        pendingCast = { spell = spell, unit = castUnit, who = tipWho }
+        f.label:SetText(text)
         f:Show()
-        -- Wire click-cast when allowed; in combat the icon still shows.
-        wireCastBtn()
+    end
+
+    local function requestAlert(who, spell)
+        if not db.reqAlert or not spell then
+            return
+        end
+        local f = ensureReqPopup()
+        if f.timer then
+            f.timer:Cancel()
+        end
+        pendingSpell = spell
+        fillPopup(f, spell, ("%s requested\n%s"):format(who or "?", spell))
         f.timer = C_Timer.NewTimer(db.reqDuration or 8, hideReqPopup)
+    end
+
+    local function toggleReqLock()
+        local f = ensureReqPopup()
+        f.unlocked = not f.unlocked
+        f:EnableMouse(f.unlocked)
+        f.shade:SetShown(f.unlocked)
+        if f.unlocked then
+            fillPopup(f, order[1] or "Innervate", "Request warning\n|cff9b9b9bdrag me, then lock|r")
+        else
+            hideReqPopup()
+        end
     end
 
     local function release(key)
@@ -700,9 +611,9 @@ FF.Init("Cooldowns", function()
     end
     local function framesFor(unit)
         local found, seen = {}, {}
-        local function try(f)
+        local function try(f, u)
             if f and not seen[f] and f.IsVisible and f:IsVisible() then
-                local u = frameUnit(f)
+                u = u or frameUnit(f)
                 if u and UnitExists(u) and UnitIsUnit(u, unit) then
                     seen[f] = true
                     found[#found + 1] = f
@@ -725,17 +636,19 @@ FF.Init("Cooldowns", function()
         end
         -- EllesmereUI and anything else: generic scan of visible frames with a
         -- .unit field (only runs on a request, never while idle)
+        -- Only real unit buttons count (secure "unit" attribute): aura / debuff
+        -- displays that merely carry a .unit field are skipped.
         if #found == 0 then
             local f = EnumerateFrames()
             local n = 0
             while f and n < 20000 do
                 n = n + 1
-                if not f:IsForbidden() and rawget(f, "unit") ~= nil then
-                    local name = f:GetName()
-                    -- raid / party style frames only (skip target, focus, nameplates)
-                    local u = frameUnit(f)
-                    if u and (u:find("^raid%d") or u:find("^party%d") or u == "player") and not (name and name:find("NamePlate")) then
-                        try(f)
+                if not f:IsForbidden() and f.GetAttribute then
+                    local u = f:GetAttribute("unit")
+                    local name = f:GetName() or ""
+                    if type(u) == "string" and (u:find("^raid%d") or u:find("^party%d") or u == "player")
+                        and not (name:find("NamePlate") or name:find("Player") or name:find("Target") or name:find("Focus")) then
+                        try(f, u)
                     end
                 end
                 f = EnumerateFrames(f)
@@ -759,7 +672,7 @@ FF.Init("Cooldowns", function()
         for key, a in pairs(lit) do
             if a.spell == n then release(key) end
         end
-        if pendingCast and pendingCast.spell == n then
+        if pendingSpell == n then
             hideReqPopup()
         end
         watchCasts()
@@ -779,8 +692,7 @@ FF.Init("Cooldowns", function()
         local frames = framesFor(unit)
         local a = { frames = {}, spell = spell }
         for _, f in ipairs(frames) do
-            local o = table.remove(pool)
-            if not o then break end -- pool is made out of combat only
+            local o = table.remove(pool) or makeOverlay()
             o:SetFrameStrata(f:GetFrameStrata())
             o:SetFrameLevel(math.min(10000, f:GetFrameLevel() + 20))
             o:ClearAllPoints()
@@ -828,7 +740,7 @@ FF.Init("Cooldowns", function()
         if db.reqHighlight then
             M.Highlight(unit, key, spell)
         end
-        requestAlert(who, spell, unit)
+        requestAlert(who, spell)
         watchCasts()
     end
 
@@ -836,18 +748,10 @@ FF.Init("Cooldowns", function()
         onRequest(text, sender)
     end
 
-    local function onRegen()
-        fillPool()
-        wireCastBtn()
-    end
-
     local function applyRequest()
         local on = wantRequests()
         FF.Listen("CHAT_MSG_WHISPER", onWhisper, on and true or false)
-        FF.Listen("PLAYER_REGEN_ENABLED", onRegen, (db.reqHighlight or db.reqClickCast) and true or false)
-        if db.reqHighlight then
-            fillPool()
-        else
+        if not db.reqHighlight then
             for key in pairs(lit) do release(key) end
             watchCasts()
         end
@@ -908,22 +812,11 @@ FF.Init("Cooldowns", function()
         local alert = function() return db.reqAlert end
         L:Slider("Warning icon size", db, "reqIconSize", 24, 96, 4, { dep = alert,
             tip = "Pixel size of the spell icon on the request popup" })
-        L:Toggle("Click icon to cast on requester", db, "reqClickCast", { dep = alert, onChange = M.ApplyRequest,
-            tip = "Out of combat: click the icon to cast. In combat Blizzard blocks rebinding — the popup still shows, and click-cast arms when combat ends (or if it was already wired before you entered)." })
+        L:Buttons({ { "Unlock / lock warning", toggleReqLock, "Shows the warning so you can drag it where you want it" } }, { dep = alert })
         local req = function() return wantRequests() end
         L:Select("Request sound", db, "reqSound", FF.SoundChoices, { dep = req, width = 180 })
         L:Slider("Request duration (seconds)", db, "reqDuration", 3, 30, 1, { dep = req,
             tip = "How long the highlight and warning popup stay up" })
-        L:Buttons({ { "Test sound", function() FF.PlaySound(db.reqSound) end },
-            { "Test highlight", function()
-                local n = M.Highlight("player", "_test", order[1] or "Innervate")
-                if n == 0 and (db.reqGlow or "solid") ~= "off" then
-                    FF.print("No raid/party frame found for you (frames must be visible)")
-                end
-            end, "Highlights your own raid frame" },
-            { "Test warning", function()
-                requestAlert(UnitName("player") or "You", order[1] or "Innervate", "player")
-            end, "Shows a sample centre-screen request warning" } }, { dep = req })
 
         L:Header("Tracked spells")
         L:Desc("Everyone running Fresh Fixes reports their own cooldowns. Turn off spells you don't care about.")

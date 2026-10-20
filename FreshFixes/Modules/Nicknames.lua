@@ -369,8 +369,7 @@ FF.Init("Nicknames", function()
         table.sort(list, function(a, b)
             return a.name < b.name
         end)
-        me()
-        return FF.Encode("NICK", 1, { from = myName, nicknames = list })
+        return FF.Encode("NICK", 1, { nicknames = list })
     end
 
     -- A push is the whole list. Anything not in it is removed.
@@ -447,10 +446,7 @@ FF.Init("Nicknames", function()
                     apply(false)
                 end)
             elseif ok then
-                M.last = ("guild push from %s: %d nicknames"):format(from, applyList(d))
-            else
-                M.last = ("guild push from %s ignored: %s"):format(from,
-                    ok == nil and "not found in your guild roster" or "not an officer")
+                applyList(d)
             end
         end
         apply(true)
@@ -506,8 +502,15 @@ FF.Init("Nicknames", function()
             hookWeakAuras()
         end
     end)
+    local framesPending -- roster changes come in bursts: refresh once
     FF.On("GROUP_ROSTER_UPDATE", function()
-        C_Timer.After(0.5, M.UpdateFrames)
+        if not framesPending then
+            framesPending = true
+            C_Timer.After(0.5, function()
+                framesPending = false
+                M.UpdateFrames()
+            end)
+        end
     end)
 
     -- Tooltip: the first line is the unit name. Put the nickname there.
@@ -561,23 +564,12 @@ FF.Init("Nicknames", function()
         if cmd == "list" or cmd == "edit" then
             FF.ShowText("Nicknames", toText(), function(text)
                 wipe(db.map)
+                wipe(db.names)
                 for _, e in ipairs(parseText(text)) do
                     setNick(e[1], e[3], e[2])
                 end
                 M.UpdateFrames()
             end, "Save")
-        elseif cmd == "debug" then
-            FF.print("Nickname debug:")
-            print("  me:", tostring(myName), "->", tostring(me()), "nick:", tostring(look(myKey)))
-            print("  last list received:", M.last or "none")
-            print("  realm:", tostring(GetRealmName()), tostring(GetNormalizedRealmName()))
-            local r = me() and member(myKey)
-            print("  guild roster has me as:", r and r.name or "-", "rank", r and r.rankIndex or "-",
-                "officer:", tostring(isOfficer(myKey)))
-            for _, u in ipairs(FF.GroupUnits()) do
-                local n = unitName(u)
-                print("  " .. u .. ":", tostring(n), "->", tostring(nameKey(n)), "nick:", tostring(M.ForUnit(u)))
-            end
         elseif cmd == "push" then
             if not IsInGuild() then
                 FF.print("You're not in a guild")
@@ -602,7 +594,6 @@ FF.Init("Nicknames", function()
             print("  /ff nick edit - edit the list (Nick: First Surname, Alt, BattleTag#1234)")
             print("  /ff nick set First Surname = Nick")
             print("  /ff nick push - officers only (guild rank 0 or 1)")
-            print("  /ff nick debug")
         end
     end, "nicknames (/ff nick help)")
 end)

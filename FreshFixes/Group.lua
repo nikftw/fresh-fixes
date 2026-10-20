@@ -125,6 +125,26 @@ function FF.CanonicalKey(key)
     return key
 end
 
+-- A guild member by name, however the realm is written ("Name", "Name-Realm",
+-- "First Surname-Realm"): exact key, the roster's full name, then the same
+-- name under another realm spelling.
+function FF.GuildMember(name)
+    local key = FF.Key(name)
+    if not key then
+        return
+    end
+    local r = FF.GuildRoster()
+    key = FF.CanonicalKey(key)
+    if r[key] then
+        return r[key]
+    end
+    for k, m in pairs(r) do
+        if FF.SameChar(k, key) then
+            return m
+        end
+    end
+end
+
 -- force: skip the 15 s throttle and rebuild from whatever the game has now
 function FF.RequestGuildRoster(force)
     if not IsInGuild() or (not force and GetTime() - lastRequest < 15) then

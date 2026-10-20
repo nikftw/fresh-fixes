@@ -10,8 +10,9 @@ FF.Init("QoL", function()
         -- social
         blockPartyInvites = false, blockFriendRequests = false, blockSharedQuests = false,
         blockPetDuels = false,
+        inviteWord = false, inviteGuildOnly = true, keyword = "inv",
         -- text
-        hideZoneText = false, hideKeybindText = false, hideMacroText = false, noHitIndicators = false,
+        hideZoneText = true, hideKeybindText = false, hideMacroText = false, noHitIndicators = false,
         -- frames
         noAlerts = false, hideTalkingHead = false, hideBossBanner = false, hideEventToasts = false,
         hideCleanupButtons = false,
@@ -26,6 +27,23 @@ FF.Init("QoL", function()
     ---------------------------------------------------------------------------
     -- Social
     ---------------------------------------------------------------------------
+    -- Whisper-keyword invites
+    M.On("CHAT_MSG_WHISPER", function() return db.inviteWord end, function(_, msg, author)
+        if not (readable(msg) and readable(author)) or msg:lower():match("^%s*(.-)%s*$") ~= db.keyword:lower() then
+            return
+        end
+        if IsInGroup() and not (UnitIsGroupLeader("player") or UnitIsGroupAssistant("player")) then
+            return
+        end
+        if db.inviteGuildOnly and not FF.GuildMember(author) then
+            return
+        end
+        if IsInGroup() and not IsInRaid() and GetNumGroupMembers() >= 5 and UnitIsGroupLeader("player") then
+            C_PartyInfo.ConvertToRaid()
+        end
+        C_PartyInfo.InviteUnit(author)
+    end)
+
     M.On("PARTY_INVITE_REQUEST", function() return db.blockPartyInvites end, function(_, name)
         if db.blockPartyInvites and not FF.IsFriendOrGuild(name) then
             DeclineGroup()
@@ -318,10 +336,10 @@ FF.Init("QoL", function()
             return
         end
         if not b then
-            b = FF.UI.Button(frame, "Train all", 80, train:GetHeight() or 22, buyAvailable)
+            b = FF.UI.Button(frame, "Train all", 80, 22, buyAvailable)
             frame.ffTrainAll = b
         end
-        local h = train:GetHeight()
+        local h = tonumber(train:GetHeight())
         b:SetHeight(h and h > 1 and h or 22)
         b:ClearAllPoints()
         b:SetPoint("RIGHT", train, "LEFT", -2, 0)
@@ -338,7 +356,7 @@ FF.Init("QoL", function()
         frame:HookScript("OnShow", placeTrainAll)
     end
 
-    M.On("ADDON_LOADED", function() return true end, function(_, name)
+    M.On("ADDON_LOADED", function() return db.trainAll end, function(_, name)
         if name == "Blizzard_TrainerUI" then
             hookTrainer()
             placeTrainAll()
@@ -406,6 +424,11 @@ FF.Init("QoL", function()
         T("Block party invites from everyone else", db, "blockPartyInvites")
         T("Block Battle.net friend requests", db, "blockFriendRequests")
         T("Block shared quests from strangers", db, "blockSharedQuests")
+
+        L:Header("Whisper invites")
+        L:Toggle("Invite people who whisper a keyword", db, "inviteWord", { onChange = M.Relisten })
+        L:Input("Keyword", db, "keyword", { dep = function() return db.inviteWord end, indent = 12 })
+        L:Toggle("Guild members only", db, "inviteGuildOnly", { dep = function() return db.inviteWord end, indent = 12 })
 
         L:Header("Death and summons")
         T("Accept summons (out of combat)", mdb, "acceptSummons")

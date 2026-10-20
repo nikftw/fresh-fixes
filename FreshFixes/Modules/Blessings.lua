@@ -43,7 +43,7 @@ FF.Init("Blessings", function()
         salvIcon = true, salvTimer = true,
         -- Tint Salv icon (requires Show Salv icon). Green / orange / red by buff state.
         salvColorIcon = true,
-        -- Active indicator: independent channels (replaces old activeStyle select).
+        -- Active indicator channels
         activeBorder = true, activeTimer = true, activeFill = false, activeIcon = true,
         -- Tint blessing icon (requires Blessing icon). Green / orange / red by buff state.
         activeColorIcon = true,
@@ -53,31 +53,12 @@ FF.Init("Blessings", function()
         raidMissingIcon = false,
         raidMissingIconSize = 18,
     })
-    -- Nested tables must be owned by this character's db (not the shared defaults).
-    if type(rawget(db, "assign")) ~= "table" then db.assign = {} end
-    if type(rawget(db, "normal")) ~= "table" then db.normal = {} end
-    db.auras, db.aura = nil, nil -- retired: no group-aura tracking
-    -- One-time migrate from the old single-select activeStyle.
-    if rawget(db, "activeStyle") ~= nil then
-        local s = db.activeStyle
-        db.activeBorder = (s == "border" or s == "both" or s == "all")
-        db.activeTimer = (s == "timer" or s == "both" or s == "all")
-        db.activeFill = (s == "fill" or s == "all")
-        db.activeStyle = nil
-    end
-    -- Enable assignments control if coming from the old off-by-default A button.
-    if rawget(db, "assignStyle") == nil and rawget(db, "assignBtn") == nil then
-        db.assignBtn = true
-    end
-    db.assignStyle, db.assignPos = nil, nil -- retired: Auto+Assign share a top row; Assign is a cog
-    if db.timerPos == "auto" then
-        db.timerPos = (db.layout == "horizontal") and "below" or "right"
-    end
+    db.assign = db.assign or {}
+    db.normal = db.normal or {}
     local C, UI = FF.C, FF.UI
     local readable = FF.readable
 
-    local loaded = (C_AddOns and C_AddOns.IsAddOnLoaded) or IsAddOnLoaded
-    if loaded and (loaded("PallyPower")) then
+    if C_AddOns.IsAddOnLoaded("PallyPower") then
         M.passive = true
         FF.Settings("Blessings", function(L)
             L:Header("Blessings")
@@ -87,12 +68,8 @@ FF.Init("Blessings", function()
     end
 
     local PREFIX = "PLPWR"
-    if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
-        C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
-    elseif RegisterAddonMessagePrefix then
-        RegisterAddonMessagePrefix(PREFIX)
-    end
-    local sendRaw = C_ChatInfo and C_ChatInfo.SendAddonMessage or SendAddonMessage
+    C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
+    local sendRaw = C_ChatInfo.SendAddonMessage
 
     local MAXC = 9
     local CLASS = { "WARRIOR", "ROGUE", "PRIEST", "DRUID", "PALADIN", "HUNTER", "MAGE", "WARLOCK", "SHAMAN" }
@@ -129,13 +106,8 @@ FF.Init("Blessings", function()
 
     local function spellInfo(id)
         if not id then return end
-        if C_Spell and C_Spell.GetSpellInfo then
-            local ok, i = pcall(C_Spell.GetSpellInfo, id)
-            if ok and type(i) == "table" then return i.name, i.iconID end
-        elseif GetSpellInfo then
-            local ok, n, _, ic = pcall(GetSpellInfo, id)
-            if ok then return n, ic end
-        end
+        local ok, i = pcall(C_Spell.GetSpellInfo, id)
+        if ok and type(i) == "table" then return i.name, i.iconID end
     end
     local function knows(id)
         if not id then return end
@@ -259,30 +231,6 @@ FF.Init("Blessings", function()
     local assign = db.assign -- [name][class] = blessing (saved)
     local normal = db.normal -- [pname][class][tname] = blessing (saved)
     M.pals, M.assign = pals, assign
-
-    -- Forever: Salv (4) is not a class assign; Sanctuary (6) was removed — strip once.
-    if not rawget(db, "foreverSpellIds") then
-        db.foreverSpellIds = true
-        db.foreverSalvSplit = true -- legacy flag; keep so older chars skip the old path
-        for _, byClass in pairs(assign) do
-            if type(byClass) == "table" then
-                for c, v in pairs(byClass) do
-                    if v == 4 or v == 6 then byClass[c] = 0 end
-                end
-            end
-        end
-        for _, byClass in pairs(normal) do
-            if type(byClass) == "table" then
-                for _, byName in pairs(byClass) do
-                    if type(byName) == "table" then
-                        for n, v in pairs(byName) do
-                            if v == 4 or v == 6 then byName[n] = nil end
-                        end
-                    end
-                end
-            end
-        end
-    end
 
     local refreshPanel, refreshHelper, refreshRaidMissingIcons -- forward
     local panelPending
@@ -835,7 +783,7 @@ FF.Init("Blessings", function()
 
     -- Local talent-tab preference (no inspect). Role overrides when set.
     local function myNeedBless()
-        local role = UnitGroupRolesAssigned and UnitGroupRolesAssigned("player")
+        local role = UnitGroupRolesAssigned("player")
         if role == "HEALER" then return 1 end
         if role == "TANK" then return 2 end
         local _, class = UnitClass("player")
@@ -888,7 +836,7 @@ FF.Init("Blessings", function()
         end
         if u == "player" then return myNeedBless() end
 
-        local role = UnitGroupRolesAssigned and UnitGroupRolesAssigned(u)
+        local role = UnitGroupRolesAssigned(u)
         if role == "HEALER" then return 1 end
         if role == "TANK" then return 2 end
         local class = unitClass(u)
@@ -1519,7 +1467,7 @@ FF.Init("Blessings", function()
         return t
     end
     local function auraRem(unit, names)
-        if not (unit and names and C_UnitAuras and C_UnitAuras.GetAuraDataByIndex) then return end
+        if not (unit and names) then return end
         local best
         for i = 1, 40 do
             local ok, a = pcall(C_UnitAuras.GetAuraDataByIndex, unit, i, "HELPFUL")
@@ -1534,7 +1482,7 @@ FF.Init("Blessings", function()
         return best
     end
     local function isTank(u)
-        local role = UnitGroupRolesAssigned and UnitGroupRolesAssigned(u)
+        local role = UnitGroupRolesAssigned(u)
         return role == "TANK" or (GetPartyAssignment and GetPartyAssignment("MAINTANK", u)) or false
     end
     local function greaterKnown(b)
@@ -3015,15 +2963,22 @@ FF.Init("Blessings", function()
     ---------------------------------------------------------------------------
     -- Events
     ---------------------------------------------------------------------------
-    local function onAura(_, unit)
-        if type(unit) ~= "string" then return end
-        if not (unit == "player" or unit:find("^raid") or unit:find("^party")) then return end
+    -- Raid aura changes come in bursts: one redraw per 0.2 s at most
+    local auraPending
+    local function flushAura()
+        auraPending = false
         if helper and helper:IsShown() then
             refreshHelper()
         end
         if db.raidMissingIcon then
             refreshRaidMissingIcons()
         end
+    end
+    local function onAura(_, unit)
+        if auraPending or type(unit) ~= "string" then return end
+        if not (unit == "player" or unit:find("^raid") or unit:find("^party")) then return end
+        auraPending = true
+        C_Timer.After(0.2, flushAura)
     end
     local wasInGroup = false
     local function onRoster()

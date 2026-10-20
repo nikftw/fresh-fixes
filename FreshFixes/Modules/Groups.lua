@@ -9,12 +9,10 @@ local M = FF.Module("Groups")
 --   * Always-mark (MRT style): give players a raid marker and put it back
 --     whenever it's removed. Each marker can list several names in priority
 --     order - the first one in the group gets it.
---   * Whisper-keyword invites.
 -- Names may be "First", "First Surname", "First Surname-Realm" or a nickname.
 FF.Init("Groups", function()
     local readable = FF.readable
     local db = FF.DB("groups", {
-        inviteWord = false, inviteGuildOnly = true, keyword = "inv",
         everyoneAssist = false, autoPromote = false, promoteByRank = false, promoteRank = 1,
         autoMark = false,
     })
@@ -394,34 +392,6 @@ FF.Init("Groups", function()
     FF.On("FF_READY", updateMarking)
 
     ---------------------------------------------------------------------------
-    -- Whisper-keyword invites
-    ---------------------------------------------------------------------------
-    local function canInvite()
-        return not IsInGroup() or UnitIsGroupLeader("player") or UnitIsGroupAssistant("player")
-    end
-
-    local function onWhisper(_, msg, author)
-        if not db.inviteWord or not (readable(msg) and readable(author)) then
-            return
-        end
-        if msg:lower():match("^%s*(.-)%s*$") ~= db.keyword:lower() or not canInvite() then
-            return
-        end
-        local key = FF.Key(author)
-        if db.inviteGuildOnly and not (key and FF.GuildRoster()[key]) then
-            return
-        end
-        if IsInGroup() and not IsInRaid() and GetNumGroupMembers() >= 5 and UnitIsGroupLeader("player") then
-            C_PartyInfo.ConvertToRaid()
-        end
-        C_PartyInfo.InviteUnit(author)
-    end
-    local function listenWhispers()
-        FF.Listen("CHAT_MSG_WHISPER", onWhisper, db.inviteWord)
-    end
-    FF.On("FF_READY", listenWhispers)
-
-    ---------------------------------------------------------------------------
     -- Settings
     ---------------------------------------------------------------------------
     local function importWindow()
@@ -498,11 +468,6 @@ FF.Init("Groups", function()
                 width = 260, indent = 12, dep = function() return db.autoMark end, onChange = markPass,
             })
         end
-
-        L:Header("Whisper invites")
-        L:Toggle("Invite people who whisper a keyword", db, "inviteWord", { onChange = listenWhispers })
-        L:Input("Keyword", db, "keyword", { dep = function() return db.inviteWord end, indent = 12 })
-        L:Toggle("Guild members only", db, "inviteGuildOnly", { dep = function() return db.inviteWord end, indent = 12 })
     end)
 
     FF.Command("group", function(rest)

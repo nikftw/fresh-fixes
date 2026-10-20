@@ -610,19 +610,5 @@ FF.Init("CoTank", function()
 
     end)
 
-    FF.Command("cotank", function(rest)
-        if rest:lower() ~= "debug" then
-            toggleLock()
-            return
-        end
-        FF.print("Co-tank debug:")
-        print("  unit:", unit or "none (no other tank found)", "debuffs:", tostring(db.debuffs), "filter:", db.debuffFilter)
-        print("  game-drawn debuff row:", btn and btn.container and "yes" or "no (using our own icons)")
-        if unit then
-            local a = C_UnitAuras.GetAuraDataByIndex(unit, 1, db.debuffFilter)
-            print("  first debuff:", a and (readable(a.name) and a.name or "hidden from addons") or "none")
-            local hp = UnitHealth(unit)
-            print("  health readable:", tostring(readable(hp)))
-        end
-    end, "unlock/lock the co-tank frame ('cotank debug' for diagnostics)")
+    FF.Command("cotank", toggleLock, "unlock/lock the co-tank frame")
 end)

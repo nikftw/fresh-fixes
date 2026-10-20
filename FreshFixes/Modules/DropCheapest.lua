@@ -12,8 +12,6 @@ FF.Init("DropCheapest", function()
         showCount = 4,
         hideBackground = false,
     })
-    if type(rawget(db, "showCount")) ~= "number" then db.showCount = 4 end
-    db.width = nil -- retired: width follows icon count
 
     local ICON = 28
     local GAP = 2
@@ -21,55 +19,29 @@ FF.Init("DropCheapest", function()
     local HEAD = 18
     local PRICE_H = 14
 
-    local CC = C_Container or {}
-    local numSlots = CC.GetContainerNumSlots or GetContainerNumSlots
-    local pickup = CC.PickupContainerItem or PickupContainerItem
-    local getItemInfo = (C_Item and C_Item.GetItemInfo) or GetItemInfo
+    local numSlots, pickup = C_Container.GetContainerNumSlots, C_Container.PickupContainerItem
+    local getItemInfo = C_Item.GetItemInfo
 
     local function slotInfo(bag, slot)
-        if CC.GetContainerItemInfo then
-            local i = CC.GetContainerItemInfo(bag, slot)
-            if i then
-                return i.hyperlink, i.stackCount, i.quality, i.isLocked, i.isBound, i.itemID
-            end
-        elseif GetContainerItemInfo then
-            local _, count, locked, quality, _, _, link, _, _, itemID = GetContainerItemInfo(bag, slot)
-            return link, count, quality, locked, nil, itemID
+        local i = C_Container.GetContainerItemInfo(bag, slot)
+        if i then
+            return i.hyperlink, i.stackCount, i.quality, i.isLocked, i.isBound, i.itemID
         end
     end
 
     local function isQuest(bag, slot)
-        if CC.GetContainerItemQuestInfo then
-            local q = CC.GetContainerItemQuestInfo(bag, slot)
-            return q and (q.isQuestItem or q.questID) and true
-        elseif GetContainerItemQuestInfo then
-            local isQ, id = GetContainerItemQuestInfo(bag, slot)
-            return isQ or id
-        end
+        local q = C_Container.GetContainerItemQuestInfo and C_Container.GetContainerItemQuestInfo(bag, slot)
+        return q and (q.isQuestItem or q.questID) and true
     end
 
     local function vendorPrice(link, itemID)
-        -- Prefer GetItemInfo sellPrice (11th return). Optional Forever helpers next.
-        local _, _, _, _, _, _, _, _, _, _, price = getItemInfo(link or itemID)
-        if type(price) == "number" and price > 0 then
-            return price
-        end
-        if C_Item then
-            for _, fn in ipairs({ C_Item.GetItemSellPriceByID, C_Item.GetItemSellPrice }) do
-                if type(fn) == "function" then
-                    local ok, p = pcall(fn, itemID or link)
-                    if ok and type(p) == "number" and p > 0 then
-                        return p
-                    end
-                end
-            end
-        end
+        local price = select(11, getItemInfo(link or itemID)) -- vendor sell price
         return type(price) == "number" and price or 0
     end
 
     local function resolveItem(link, itemID, quality)
         local name, _, q, _, _, _, _, _, _, texture, sell, classID = getItemInfo(link or itemID)
-        if not name and itemID and C_Item and C_Item.RequestLoadItemDataByID then
+        if not name and itemID then
             pcall(C_Item.RequestLoadItemDataByID, itemID)
         end
         if quality == nil or quality < 0 then quality = q end
@@ -178,7 +150,7 @@ FF.Init("DropCheapest", function()
             DeleteCursorItem()
             FF.print("Deleted " .. describe(it))
         end
-        if M.Refresh then M.Refresh() end
+        M.Refresh()
     end
 
     StaticPopupDialogs.FF_DROP_CHEAPEST = {
@@ -205,31 +177,18 @@ FF.Init("DropCheapest", function()
         dropItem(find())
     end
 
-    function M.Preview()
-        local list = findAll(db.showCount or 4)
-        if #list == 0 then
-            FF.print("Nothing cheap enough to drop")
-            return
-        end
-        for i, it in ipairs(list) do
-            FF.print(("%d. Would drop %s"):format(i, describe(it)))
-        end
-    end
-
     FF.Command("drop", function(arg)
         arg = (arg or ""):lower()
-        if arg == "show" or arg == "?" then
-            M.Preview()
-        elseif arg == "hide" then
+        if arg == "hide" then
             db.button = false
-            if M.Apply then M.Apply() end
+            M.Apply()
         elseif arg == "toggle" then
             db.button = not db.button
-            if M.Apply then M.Apply() end
+            M.Apply()
         else
             M.Drop()
         end
-    end, "delete the cheapest junk item (/ff drop show to preview)")
+    end, "delete the cheapest junk item ('drop toggle' shows / hides the window)")
 
     ---------------------------------------------------------------------------
     -- Window: row 1 = free/total slots · row 2 = exactly N junk icons
@@ -373,7 +332,17 @@ FF.Init("DropCheapest", function()
         end
     end
 
+    -- bag / item-info changes only matter while the window is up
+    local function refresh()
+        M.Refresh()
+    end
+    local function listen(on)
+        FF.Listen("BAG_UPDATE_DELAYED", refresh, on)
+        FF.Listen("GET_ITEM_INFO_RECEIVED", refresh, on)
+    end
+
     function M.Apply()
+        listen(db.button and true or false)
         if not db.button then
             if win then win:Hide() end
             return
@@ -385,17 +354,9 @@ FF.Init("DropCheapest", function()
     end
 
     FF.On("FF_READY", M.Apply)
-    FF.On("BAG_UPDATE", function()
-        if win and win:IsShown() then M.Refresh() end
-    end)
-    FF.On("PLAYER_ENTERING_WORLD", function()
+    FF.On("FF_ZONE", function()
         if db.button then M.Apply() end
     end)
-    if C_Item and C_Item.GetItemInfo then
-        FF.On("GET_ITEM_INFO_RECEIVED", function()
-            if win and win:IsShown() then M.Refresh() end
-        end)
-    end
 
     FF.Settings("DropCheapest", function(L)
         L:Header("Drop cheapest item")
@@ -421,9 +382,9 @@ FF.Init("DropCheapest", function()
         L:Select("Highest quality to consider", db, "maxQuality", {
             { 0, "Poor (grey) only" },
             { 1, "Common (white) too" },
-        }, { onChange = function() if M.Refresh then M.Refresh() end end })
+        }, { onChange = M.Refresh })
         L:Toggle("Skip soulbound items (above grey)", db, "skipBound", {
-            onChange = function() if M.Refresh then M.Refresh() end end,
+            onChange = M.Refresh,
         })
     end)
 end)

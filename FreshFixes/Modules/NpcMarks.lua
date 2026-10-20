@@ -1,5 +1,5 @@
 local _, FF = ...
-local M = FF.Module("NpcMarks")
+FF.Module("NpcMarks")
 
 -- Auto-mark NPCs: give each raid marker a list of NPC IDs; hovering such a mob
 -- while holding the chosen key marks it. Event-driven only (mouseover), no

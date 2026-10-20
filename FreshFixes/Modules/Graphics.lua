@@ -15,14 +15,10 @@ FF.Init("Graphics", function()
         chat = false,
         -- false = Off (don't manage). 0..4 = Max visibility … Max graphics.
         preset = false,
-        values = {},
-        manage = {},
-        originals = {},
     })
     db.values = db.values or {}
     db.manage = db.manage or {}
     db.originals = db.originals or {}
-    db.held, db.reloadCheck, db.notKept = nil, nil, nil -- retired (nameplate reload holds)
 
     local EPSILON = 1e-4
     local pending, applying, verifyQueued = false, false, false
@@ -269,15 +265,22 @@ FF.Init("Graphics", function()
         return changed
     end
 
-    local function ApplyAll(verifying)
+    local ApplyAll
+    local function afterCombat()
+        if pending then
+            ApplyAll()
+        end
+    end
+
+    function ApplyAll(verifying)
         if type(db.preset) ~= "number" and next(db.values) == nil then
             return 0
         end
-        if InCombatLockdown() then
-            pending = true
+        pending = InCombatLockdown() and true or false
+        FF.Listen("PLAYER_REGEN_ENABLED", afterCombat, pending) -- only while a change waits
+        if pending then
             return nil
         end
-        pending = false
         applying = true
         for _, entry in ipairs(Cat.ENTRIES) do
             if IsManaged(entry) and IsSupported(entry) then
@@ -441,12 +444,6 @@ FF.Init("Graphics", function()
         end
         printChat(("Graphics: applied (%d changed)"):format(n))
     end
-
-    FF.On("PLAYER_REGEN_ENABLED", function()
-        if pending then
-            ApplyAll()
-        end
-    end)
 
     FF.On("FF_READY", function()
         if db.applyAtLogin and (type(db.preset) == "number" or next(db.values)) then
