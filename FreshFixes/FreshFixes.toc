@@ -40,5 +40,6 @@ Modules\Waypoints.lua
 Modules\Professions.lua
 Modules\Guild.lua
 Modules\DropCheapest.lua
+Modules\DebuffTracker.lua
 Modules\NpcMarks.lua
 Modules\Blessings.lua
