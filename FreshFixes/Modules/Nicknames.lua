@@ -89,46 +89,6 @@ FF.Init("Nicknames", function()
         return norm(full), full
     end
 
-    -- Lookup indexes, rebuilt after every change
-    local bySquash, byFirst
-    local function index()
-        bySquash, byFirst = {}, {}
-        for k, v in pairs(db.map) do
-            if not k:find("^bt:") then
-                bySquash[squash(k:match("^[^%-]+"))] = v
-                local f = firstWord(k)
-                if byFirst[f] == nil then
-                    byFirst[f] = v
-                elseif byFirst[f] ~= v then
-                    byFirst[f] = false -- two people share the first name
-                end
-            end
-        end
-    end
-
-    local function look(s)
-        local k = nameKey(s)
-        if not k then
-            return
-        end
-        if db.map[k] then
-            return db.map[k]
-        end
-        if k:find("^bt:") then
-            return
-        end
-        if not bySquash then
-            index()
-        end
-        local first = firstWord(k)
-        if k ~= first then
-            -- full name: same name spelled without spaces, or an entry made
-            -- with just the first name
-            return bySquash[squash(k)] or db.map[first] or nil
-        end
-        return bySquash[k] or byFirst[k] or nil -- only a first name to go on
-    end
-
     local function unitName(unit)
         local first, surname = UnitFullName(unit)
         if readable(first) and readable(surname) and type(first) == "string" and first ~= "" then
@@ -136,8 +96,37 @@ FF.Init("Nicknames", function()
         end
     end
 
+    -- The one rule: a nickname shows only when the character's first AND last
+    -- name match a row. A first name alone never matches, and the realm part
+    -- is ignored. bySquash also lets our internal keys ("nikpalatoo-realm",
+    -- spaces removed) find "nik palatoo"; it only holds full names.
+    local bySquash
+    local function look(s)
+        local k = nameKey(s)
+        if not k then
+            return
+        end
+        if k:find("^bt:") or k:find(" ", 1, true) then
+            return db.map[k]
+        end
+        if not bySquash then
+            bySquash = {}
+            for key, v in pairs(db.map) do
+                if key:find(" ", 1, true) then
+                    bySquash[squash(key)] = v
+                end
+            end
+        end
+        return bySquash[k]
+    end
+
     function M.Get(name)
         return look(name)
+    end
+
+    -- where: the "where nicknames show" setting asking (frames, chat, ...)
+    function M.For(unit, where)
+        return db[where] and M.ForUnit(unit) or nil
     end
 
     function M.ForUnit(unit)
@@ -205,20 +194,26 @@ FF.Init("Nicknames", function()
     ---------------------------------------------------------------------------
     -- Unit frames: Blizzard player / target / focus / party, and raid frames
     ---------------------------------------------------------------------------
+    -- fromGame: Blizzard just wrote the real name, so remember it; going back
+    -- from a nickname restores exactly that text (never looked up again).
     local busy
-    local function nameUnitFrame(f)
+    local function nameUnitFrame(f, fromGame)
         local fs = f and f.ffName
-        if fs and f.unit and not busy then
-            busy = true
-            local nick = db.frames and M.ForUnit(f.unit)
-            if nick then
-                fs:SetText(nick)
-            elseif f.ffNicked then
-                fs:SetText(GetUnitName(f.unit, false) or "")
-            end
-            f.ffNicked = nick ~= nil
-            busy = false
+        if not fs or not f.unit or busy then
+            return
         end
+        busy = true
+        if fromGame then
+            f.ffReal = fs:GetText()
+        end
+        local nick = M.For(f.unit, "frames")
+        if nick then
+            fs:SetText(nick)
+        elseif f.ffNicked and f.ffReal then
+            fs:SetText(f.ffReal)
+        end
+        f.ffNicked = nick ~= nil
+        busy = false
     end
 
     local unitFrames = {}
@@ -234,9 +229,9 @@ FF.Init("Nicknames", function()
                 unitFrames[#unitFrames + 1] = f
                 -- whatever updates the name, put the nickname back on top
                 hooksecurefunc(fs, "SetText", function()
-                    nameUnitFrame(f)
+                    nameUnitFrame(f, true)
                 end)
-                nameUnitFrame(f)
+                nameUnitFrame(f, true)
             end
         end
     end
@@ -246,7 +241,7 @@ FF.Init("Nicknames", function()
         if not db.frames or not frame or (frame.IsForbidden and frame:IsForbidden()) or not frame.name then
             return
         end
-        local nick = M.ForUnit(frame.unit)
+        local nick = M.For(frame.unit, "frames")
         if nick then
             frame.name:SetText(nick)
         end
@@ -260,16 +255,19 @@ FF.Init("Nicknames", function()
         for _, f in ipairs(unitFrames) do
             nameUnitFrame(f)
         end
-        if not db.frames then
-            return
+        -- let Blizzard rewrite the real names; the hook puts nicknames on top
+        local function redraw(frame)
+            if frame and frame.unit and not (frame.IsForbidden and frame:IsForbidden()) then
+                CompactUnitFrame_UpdateName(frame)
+            end
         end
         for g = 1, 8 do
             for i = 1, 5 do
-                nameRaidFrame(_G["CompactRaidGroup" .. g .. "Member" .. i])
+                redraw(_G["CompactRaidGroup" .. g .. "Member" .. i])
             end
         end
         for i = 1, 40 do
-            nameRaidFrame(_G["CompactPartyFrameMember" .. i] or _G["CompactRaidFrame" .. i])
+            redraw(_G["CompactPartyFrameMember" .. i] or _G["CompactRaidFrame" .. i])
         end
     end
 
@@ -282,7 +280,7 @@ FF.Init("Nicknames", function()
             return text
         end
         return (text:gsub("(|Hplayer:([^:|]+)[^|]*|h)(.-)(|h)", function(open, target, shown, close)
-            local nick = look(target)
+            local nick = look(target) -- full name in the link, or nothing
             if not nick then
                 return
             end
@@ -465,7 +463,7 @@ FF.Init("Nicknames", function()
             local orig = WA.GetName
             WA.GetName = function(name)
                 if name then
-                    return look(name) or orig(name)
+                    return (db.weakauras and look(name)) or orig(name)
                 end
             end
         end
@@ -473,13 +471,13 @@ FF.Init("Nicknames", function()
             local orig = WA.UnitName
             WA.UnitName = function(unit)
                 local name, realm = orig(unit)
-                return M.ForUnit(unit) or name, realm
+                return M.For(unit, "weakauras") or name, realm
             end
         end
         if WA.GetUnitName then
             local orig = WA.GetUnitName
             WA.GetUnitName = function(unit, showServer)
-                return M.ForUnit(unit) or orig(unit, showServer)
+                return M.For(unit, "weakauras") or orig(unit, showServer)
             end
         end
     end
@@ -519,7 +517,7 @@ FF.Init("Nicknames", function()
             return
         end
         local _, unit = tip:GetUnit()
-        local nick = M.ForUnit(unit)
+        local nick = M.For(unit, "tooltip")
         local line = nick and GameTooltipTextLeft1
         if line then
             local r, g, b = line:GetTextColor()
@@ -545,7 +543,7 @@ FF.Init("Nicknames", function()
                 return false, names[1] .. " isn't installed or enabled."
             end
         end
-        L:Toggle("EllesmereUI raid and unit frames", db, "ellesmere", { dep = has("EllesmereUIRaidFrames", "EllesmereUIUnitFrames", "EllesmereUI"), tip = "EUI unit frames also need EUI's own 'Show nicknames' option. Reload to apply." })
+        L:Toggle("EllesmereUI raid and unit frames", db, "ellesmere", { dep = has("EllesmereUIRaidFrames", "EllesmereUIUnitFrames", "EllesmereUI"), onChange = M.UpdateFrames })
         L:Toggle("ElvUI tags  [ff:name]", db, "elvui", { dep = has("ElvUI"), tip = "Adds [ff:name], [ff:name:short] (veryshort/medium/long) and [ff:target]. Reload to apply." })
         L:Toggle("Grid2 status", db, "grid2", { dep = has("Grid2"), tip = "Adds the 'Fresh Fixes Nickname' status for text indicators. Reload to apply." })
         L:Toggle("VuhDo bar names", db, "vuhdo", { dep = has("VuhDo"), tip = "Reload to apply." })

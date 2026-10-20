@@ -6,11 +6,9 @@ local M = FF.Module("Nicknames")
 --   ElvUI : tags [ff:name], [ff:name:veryshort|short|medium|long], [ff:target]
 --   Grid2 : status "Fresh Fixes Nickname" (assign it to a text indicator)
 --   VuhDo : bar names replaced with nicknames
---   EllesmereUI (EUI) : raid + unit frames. EUI asks a fixed list of nickname
---           addons; we answer through the one it calls by name
---           (LiquidAPI.GetNicknameForEllesmereUI). If the real Liquid addon is
---           installed we chain to it instead of replacing it. EUI unit frames
---           also need EUI's own "Show nicknames" option turned on.
+--   EllesmereUI (EUI) : raid + unit frames, through the provider EUI asks with
+--           the unit (EasyNicknameAPI.GetNicknameForUnitForSurface), so the full
+--           name is matched. Chains to a real provider if one is installed.
 ---------------------------------------------------------------------------
 -- Grid2. Grid2 creates its statuses from its saved settings while it loads,
 -- so ours must exist by then: register the moment Grid2 loads (as RG Aliases
@@ -22,7 +20,7 @@ local function grid2Name(unit)
     if not unit or not FF.readable(unit) or not UnitExists(unit) then
         return
     end
-    return (M.ForUnit and M.ForUnit(unit)) or UnitName(unit)
+    return (M.For and M.For(unit, "grid2")) or UnitName(unit)
 end
 
 local function hookGrid2()
@@ -86,7 +84,7 @@ FF.Init("Nicknames", function()
         if not unit or not readable(unit) or not UnitExists(unit) then
             return
         end
-        return M.ForUnit(unit) or UnitName(unit)
+        return M.For(unit, "elvui") or UnitName(unit)
     end
 
     local function cut(s, n)
@@ -167,7 +165,7 @@ FF.Init("Nicknames", function()
                     return
                 end
                 local unit = button and button.GetAttribute and button:GetAttribute("unit")
-                local nick = unit and M.ForUnit(unit)
+                local nick = unit and M.For(unit, "vuhdo")
                 if not nick then
                     return
                 end
@@ -185,6 +183,7 @@ FF.Init("Nicknames", function()
     ---------------------------------------------------------------------------
     -- EllesmereUI
     ---------------------------------------------------------------------------
+    local euiCallbacks = {} -- EUI's name refreshers
     local function ellesmereLoaded()
         return C_AddOns.IsAddOnLoaded("EllesmereUIRaidFrames") or C_AddOns.IsAddOnLoaded("EllesmereUIUnitFrames")
     end
@@ -194,16 +193,30 @@ FF.Init("Nicknames", function()
             return
         end
         hooked.ellesmere = true
-        LiquidAPI = LiquidAPI or {}
-        local previous = LiquidAPI.GetNicknameForEllesmereUI
-        LiquidAPI.GetNicknameForEllesmereUI = function(name)
-            return M.Get(name) or (previous and previous(name)) or nil
+        local api = EasyNicknameAPI or {}
+        EasyNicknameAPI = api
+        -- returns nick, true when we have one; otherwise EUI carries on as normal
+        local previous = api.GetNicknameForUnitForSurface
+        api.GetNicknameForUnitForSurface = function(unit, surface)
+            local nick = M.For(unit, "ellesmere")
+            if nick then
+                return nick, true
+            end
+            if previous then
+                return previous(unit, surface)
+            end
+            return nil, false
+        end
+        if not api.RegisterCallback then
+            api.RegisterCallback = function(_, fn, owner) -- EUI: "SurfaceNicknamesChanged"
+                euiCallbacks[owner or fn] = fn
+            end
         end
     end
 
     local function refreshEllesmere()
-        if hooked.ellesmere and _G._EUF_RefreshUnitNames then
-            pcall(_G._EUF_RefreshUnitNames)
+        for _, fn in pairs(euiCallbacks) do
+            pcall(fn)
         end
     end
 
